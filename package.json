@@ -1,0 +1,38 @@
+{
+  "name": "netmon",
+  "version": "1.0.0",
+  "description": "SMB Network Monitoring Dashboard",
+  "main": "server/server.js",
+  "scripts": {
+    "dev": "concurrently \"npm run server:dev\" \"npm run client:dev\"",
+    "server:dev": "nodemon server/server.js",
+    "client:dev": "cd client && npm run dev",
+    "build": "cd client && npm install && npm run build",
+    "start": "node server/server.js",
+    "seed": "node server/db/seed.js"
+  },
+  "dependencies": {
+    "@fastify/cookie": "^9.3.1",
+    "@fastify/cors": "^9.0.1",
+    "@fastify/jwt": "^8.0.0",
+    "@fastify/static": "^7.0.3",
+    "axios": "^1.6.8",
+    "bcrypt": "^5.1.1",
+    "better-sqlite3": "^9.4.3",
+    "dotenv": "^16.4.5",
+    "fastify": "^4.26.2",
+    "fastify-plugin": "^4.5.1",
+    "ip-range-check": "^0.2.0",
+    "jsonwebtoken": "^9.0.2",
+    "netmask": "^2.0.2",
+    "node-cron": "^3.0.3",
+    "nodemailer": "^6.9.13",
+    "p-limit": "^3.1.0",
+    "ping": "^0.4.4",
+    "socket.io": "^4.7.5"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2",
+    "nodemon": "^3.1.0"
+  }
+}

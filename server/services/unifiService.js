@@ -1,0 +1,179 @@
+const axios = require('axios');
+const https = require('https');
+const db = require('../db/database');
+
+let sessionCache = {
+    sessionCookie: null,
+    csrfToken: null,
+    expiresAt: 0
+};
+
+let dataCache = new Map();
+
+function getSettings() {
+    const settings = db.prepare('SELECT key, value FROM settings').all();
+    return settings.reduce((acc, curr) => {
+        acc[curr.key] = curr.value;
+        return acc;
+    }, {});
+}
+
+async function authenticate() {
+    const settings = getSettings();
+    const { unifi_url, unifi_username, unifi_password, unifi_ssl_verify } = settings;
+
+    if (!unifi_url || !unifi_username || !unifi_password) {
+        throw new Error('UniFi credentials not configured');
+    }
+
+    const httpsAgent = new https.Agent({
+        rejectUnauthorized: unifi_ssl_verify === '1'
+    });
+
+    try {
+        const response = await axios.post(`${unifi_url}/api/auth/login`, {
+            username: unifi_username,
+            password: unifi_password,
+            rememberMe: false
+        }, {
+            headers: { 'Content-Type': 'application/json' },
+            httpsAgent
+        });
+
+        const setCookieHeader = response.headers['set-cookie'];
+        let sessionCookie = null;
+        if (setCookieHeader) {
+            const tokenCookie = setCookieHeader.find(c => c.startsWith('TOKEN='));
+            if (tokenCookie) {
+                sessionCookie = tokenCookie.split(';')[0].split('=')[1];
+            }
+        }
+
+        const csrfToken = response.headers['x-csrf-token'];
+
+        if (!sessionCookie || !csrfToken) {
+            throw new Error('Failed to extract session or CSRF token from UniFi login');
+        }
+
+        sessionCache = {
+            sessionCookie,
+            csrfToken,
+            expiresAt: Date.now() + 3600000 // 1 hour
+        };
+
+        return true;
+    } catch (error) {
+        console.error('UniFi Auth Error:', error.message);
+        throw error;
+    }
+}
+
+async function makeRequest(method, endpoint, data = null, retry = true) {
+    if (Date.now() > sessionCache.expiresAt) {
+        await authenticate();
+    }
+
+    const settings = getSettings();
+    const { unifi_url, unifi_site, unifi_ssl_verify } = settings;
+    const site = unifi_site || 'default';
+
+    const url = `${unifi_url}/proxy/network/api/s/${site}${endpoint}`;
+
+    const httpsAgent = new https.Agent({
+        rejectUnauthorized: unifi_ssl_verify === '1'
+    });
+
+    const headers = {
+        'Cookie': `TOKEN=${sessionCache.sessionCookie}`,
+        'X-CSRF-Token': sessionCache.csrfToken,
+        'Content-Type': 'application/json'
+    };
+
+    try {
+        const config = { method, url, headers, httpsAgent };
+        if (data) config.data = data;
+
+        const response = await axios(config);
+        return response.data;
+    } catch (error) {
+        if (error.response && error.response.status === 401 && retry) {
+            // Re-auth and retry once
+            await authenticate();
+            return makeRequest(method, endpoint, data, false);
+        }
+        console.error(`UniFi API Error on ${endpoint}:`, error.message);
+        return null;
+    }
+}
+
+async function getFromCacheOrFetch(key, fetchFn) {
+    const cached = dataCache.get(key);
+    if (cached && (Date.now() - cached.cachedAt < 55000)) {
+        return cached.data;
+    }
+
+    const data = await fetchFn();
+    if (data) {
+        dataCache.set(key, { data, cachedAt: Date.now() });
+    }
+    return data;
+}
+
+// ---------------------------------------------------------
+// Exposed Methods
+// ---------------------------------------------------------
+
+async function getClients() {
+    return getFromCacheOrFetch('clients', () => makeRequest('GET', '/stat/sta'));
+}
+
+async function getAllUsers() {
+    return getFromCacheOrFetch('users', () => makeRequest('GET', '/list/user'));
+}
+
+async function getDevices() {
+    return getFromCacheOrFetch('devices', () => makeRequest('GET', '/stat/device'));
+}
+
+async function getSiteHealth() {
+    return getFromCacheOrFetch('health', () => makeRequest('GET', '/stat/health'));
+}
+
+async function getDailyUserReport(mac, start, end) {
+    const body = {
+        attrs: ["tx_bytes", "rx_bytes", "time"],
+        start,
+        end
+    };
+    if (mac) {
+        body.macs = [mac];
+    }
+    return makeRequest('POST', '/stat/report/daily.user', body);
+}
+
+async function getHourlySiteReport(start, end) {
+    const body = {
+        attrs: ["wan-tx_bytes", "wan-rx_bytes", "time"],
+        start,
+        end
+    };
+    return makeRequest('POST', '/stat/report/hourly.site', body);
+}
+
+async function getWanStats() {
+    const data = await getSiteHealth();
+    if (!data || !data.data) return null;
+    const wan = data.data.find(s => s.subsystem === 'wan');
+    return wan || null;
+}
+
+module.exports = {
+    getClients,
+    getAllUsers,
+    getDevices,
+    getSiteHealth,
+    getDailyUserReport,
+    getHourlySiteReport,
+    getWanStats,
+    authenticate
+};

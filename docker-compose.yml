@@ -1,0 +1,9 @@
+services:
+  netmon:
+    build: .
+    ports:
+      - "3001:3001"
+    volumes:
+      - ./data:/app/data # persist SQLite DB
+    env_file: .env
+    restart: unless-stopped
