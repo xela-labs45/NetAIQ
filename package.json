@@ -8,7 +8,7 @@
     "server:dev": "nodemon server/server.js",
     "client:dev": "cd client && npm run dev",
     "build": "cd client && npm install && npm run build",
-    "start": "node server/server.js",
+    "start": "node server/db/seed.js && node server/server.js",
     "seed": "node server/db/seed.js"
   },
   "dependencies": {
