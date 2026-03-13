@@ -1,11 +1,16 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   Box, Typography, Button, Dialog, DialogTitle, DialogContent,
   DialogActions, TextField, MenuItem, FormControlLabel, Switch, Chip,
-  IconButton, Tooltip, Drawer, Grid, Paper
+  IconButton, Tooltip, Drawer, Grid, Paper, Tabs, Tab
 } from '@mui/material';
 import { DataGrid } from '@mui/x-data-grid';
-import { Add as AddIcon, Edit as EditIcon, Delete as DeleteIcon, Speed as PingIcon, Refresh as RefreshIcon } from '@mui/icons-material';
+import {
+  Add as AddIcon, Edit as EditIcon, Delete as DeleteIcon,
+  Speed as PingIcon, Refresh as RefreshIcon,
+  SettingsEthernet as EthernetIcon, Wifi as WifiIcon,
+  HelpOutline as UnknownIcon
+} from '@mui/icons-material';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import axios from 'axios';
 import { LineChart, Line, XAxis, YAxis, Tooltip as RechartsTooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
@@ -16,6 +21,7 @@ export default function Devices() {
   const [openAdd, setOpenAdd] = useState(false);
   const [selectedDevice, setSelectedDevice] = useState(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [filterTab, setFilterTab] = useState(0); // 0=All, 1=Wired, 2=Wireless, 3=Unknown, 4=Offline
 
   const [formData, setFormData] = useState({
     hostname: '', ip_address: '', mac_address: '', device_type: 'other',
@@ -137,7 +143,7 @@ export default function Devices() {
   const segments = segmentsData?.segments || [];
 
   // Build IP → merged-online-entry lookup
-  const onlineLookup = React.useMemo(() => {
+  const onlineLookup = useMemo(() => {
     const map = new Map();
     for (const d of (onlineData?.devices || [])) {
       map.set(d.ip, d);
@@ -145,27 +151,88 @@ export default function Devices() {
     return map;
   }, [onlineData]);
 
+  // Enrich devices with is_wired from merged data
+  const enrichedDevices = useMemo(() => {
+    return devices.map(d => {
+      const merged = onlineLookup.get(d.ip_address);
+      return {
+        ...d,
+        is_wired: merged ? merged.is_wired : null,
+        merged_source: merged?.source || null,
+      };
+    });
+  }, [devices, onlineLookup]);
+
+  // Filter devices by tab
+  const filteredDevices = useMemo(() => {
+    switch (filterTab) {
+      case 1: // Wired
+        return enrichedDevices.filter(d => d.is_wired === true);
+      case 2: // Wireless
+        return enrichedDevices.filter(d => d.is_wired === false);
+      case 3: // Unknown
+        return enrichedDevices.filter(d => d.is_wired === null && d.status !== 'down');
+      case 4: // Offline
+        return enrichedDevices.filter(d => d.status === 'down');
+      default: // All
+        return enrichedDevices;
+    }
+  }, [enrichedDevices, filterTab]);
+
+  // Count devices per filter for badge labels
+  const filterCounts = useMemo(() => ({
+    all: enrichedDevices.length,
+    wired: enrichedDevices.filter(d => d.is_wired === true).length,
+    wireless: enrichedDevices.filter(d => d.is_wired === false).length,
+    unknown: enrichedDevices.filter(d => d.is_wired === null && d.status !== 'down').length,
+    offline: enrichedDevices.filter(d => d.status === 'down').length,
+  }), [enrichedDevices]);
+
   const columns = [
     {
       field: 'status',
       headerName: 'Status',
       width: 80,
       renderCell: (params) => {
-        // Cross-reference with merged online list
-        const onlineMap = onlineLookup;
-        const mergedEntry = onlineMap.get(params.row.ip_address);
+        const mergedEntry = onlineLookup.get(params.row.ip_address);
         const effectiveStatus = mergedEntry ? 'up' : (params.value || null);
         return (
-          <Box sx={{ display: 'flex', alignItems: 'center', height: '100%', pl: 2, gap: 1 }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', height: '100%', pl: 2 }}>
             <Box sx={{
               width: 12, height: 12, borderRadius: '50%',
               bgcolor: effectiveStatus === 'up' ? 'success.main' : effectiveStatus === 'down' ? 'error.main' : 'warning.main',
               boxShadow: effectiveStatus === 'up' ? '0 0 8px #22c55e' : 'none'
             }} />
-            {mergedEntry && mergedEntry.source !== 'ping' && (
-              <Chip label={mergedEntry.source} size="small" variant="outlined"
-                sx={{ height: 16, fontSize: '0.6rem', opacity: 0.6 }} />
-            )}
+          </Box>
+        );
+      }
+    },
+    {
+      field: 'connection',
+      headerName: 'Connection',
+      width: 130,
+      renderCell: (params) => {
+        const isWired = params.row.is_wired;
+        if (isWired === true) {
+          return (
+            <Box sx={{ display: 'flex', alignItems: 'center', height: '100%', gap: 0.5 }}>
+              <EthernetIcon fontSize="small" sx={{ color: '#22c55e' }} />
+              <Typography variant="body2" sx={{ color: '#22c55e' }}>Wired</Typography>
+            </Box>
+          );
+        }
+        if (isWired === false) {
+          return (
+            <Box sx={{ display: 'flex', alignItems: 'center', height: '100%', gap: 0.5 }}>
+              <WifiIcon fontSize="small" sx={{ color: '#06b6d4' }} />
+              <Typography variant="body2" sx={{ color: '#06b6d4' }}>WiFi</Typography>
+            </Box>
+          );
+        }
+        return (
+          <Box sx={{ display: 'flex', alignItems: 'center', height: '100%', gap: 0.5 }}>
+            <UnknownIcon fontSize="small" sx={{ color: '#888' }} />
+            <Typography variant="body2" sx={{ color: '#888' }}>Unknown</Typography>
           </Box>
         );
       }
@@ -219,10 +286,9 @@ export default function Devices() {
     }
   ];
 
-
   return (
     <Box sx={{ height: 'calc(100vh - 100px)', display: 'flex', flexDirection: 'column' }}>
-      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
+      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
         <Typography variant="h4" fontWeight="bold">Devices</Typography>
         <Box>
           <Button startIcon={<RefreshIcon />} onClick={() => queryClient.invalidateQueries(['devices'])} sx={{ mr: 2 }}>
@@ -234,9 +300,20 @@ export default function Devices() {
         </Box>
       </Box>
 
+      {/* Filter Tabs */}
+      <Box sx={{ borderBottom: 1, borderColor: 'divider', mb: 2 }}>
+        <Tabs value={filterTab} onChange={(e, v) => setFilterTab(v)} aria-label="device filter tabs">
+          <Tab label={`All (${filterCounts.all})`} />
+          <Tab label={`Wired (${filterCounts.wired})`} icon={<EthernetIcon sx={{ fontSize: 16 }} />} iconPosition="start" />
+          <Tab label={`Wireless (${filterCounts.wireless})`} icon={<WifiIcon sx={{ fontSize: 16 }} />} iconPosition="start" />
+          <Tab label={`Unknown (${filterCounts.unknown})`} icon={<UnknownIcon sx={{ fontSize: 16 }} />} iconPosition="start" />
+          <Tab label={`Offline (${filterCounts.offline})`} sx={{ color: filterCounts.offline > 0 ? 'error.main' : undefined }} />
+        </Tabs>
+      </Box>
+
       <Box sx={{ flexGrow: 1, bgcolor: 'background.paper', borderRadius: 1 }}>
         <DataGrid
-          rows={devices}
+          rows={filteredDevices}
           columns={columns}
           initialState={{
             pagination: { paginationModel: { pageSize: 25 } },

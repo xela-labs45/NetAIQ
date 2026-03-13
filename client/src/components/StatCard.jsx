@@ -1,7 +1,7 @@
 import React from 'react';
 import { Box, Card, Typography } from '@mui/material';
 
-export default function StatCard({ title, value, color, icon, urgent }) {
+export default function StatCard({ title, value, color, icon, urgent, subtitle }) {
   return (
     <Card
       sx={{
@@ -21,6 +21,9 @@ export default function StatCard({ title, value, color, icon, urgent }) {
         <Typography variant="h4" component="div" sx={{ color: urgent ? 'error.main' : 'text.primary', fontWeight: 'bold' }}>
           {value}
         </Typography>
+        {subtitle && (
+          <Typography variant="caption" color="text.secondary">{subtitle}</Typography>
+        )}
       </Box>
       <Box sx={{
         backgroundColor: `${color}22`,

@@ -95,7 +95,7 @@ async function mergeOnlineDevices() {
                         mac: null,
                         hostname: null,
                         source: 'scan',
-                        is_wired: null,
+                        is_wired: true, // assumed wired — UniFi would detect wireless
                         is_critical: false,
                         segment_id: scan.segment_id,
                         segment_name: segmentMap.get(scan.segment_id) || null,
@@ -157,7 +157,7 @@ async function mergeOnlineDevices() {
                     mac: row.mac_address || null,
                     hostname: row.hostname || null,
                     source: 'ping',
-                    is_wired: null,
+                    is_wired: true, // assumed wired — UniFi would detect wireless
                     is_critical: row.is_critical === 1,
                     segment_id: row.segment_id || null,
                     segment_name: row.segment_name || null,
@@ -181,17 +181,19 @@ async function mergeOnlineDevices() {
 /**
  * Returns a summary count of online devices.
  * - total: all unique online IPs
- * - lan: wired devices (is_wired === true) + non-UniFi sources
- * - unifi_infra: all devices reported by UniFi
+ * - wired: is_wired === true (UniFi wired clients + non-UniFi devices assumed wired)
+ * - wireless: is_wired === false (UniFi wireless clients)
+ * - unifi_seen: total clients present in UniFi stat/sta
  */
 async function getOnlineCount() {
     const devices = await mergeOnlineDevices();
 
     const total = devices.length;
-    const unifi_infra = devices.filter(d => d.source === 'unifi').length;
-    const lan = devices.filter(d => d.source !== 'unifi' || d.is_wired).length;
+    const wired = devices.filter(d => d.is_wired === true).length;
+    const wireless = devices.filter(d => d.is_wired === false).length;
+    const unifi_seen = devices.filter(d => d.source === 'unifi').length;
 
-    return { total, lan, unifi_infra };
+    return { total, wired, wireless, unifi_seen };
 }
 
 module.exports = {

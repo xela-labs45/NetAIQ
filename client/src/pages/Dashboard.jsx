@@ -4,7 +4,8 @@ import { useQuery } from '@tanstack/react-query';
 import axios from 'axios';
 import StatCard from '../components/StatCard';
 import {
-    Computer, CheckCircle, Cancel, Warning, Error as ErrorIcon, Wifi as WifiIcon
+    Computer, Cancel, Warning, Error as ErrorIcon,
+    Wifi as WifiIcon, SettingsEthernet as EthernetIcon, Devices as DevicesIcon
 } from '@mui/icons-material';
 import { PieChart, Pie, Cell, Tooltip as RechartsTooltip, ResponsiveContainer } from 'recharts';
 
@@ -15,14 +16,13 @@ export default function Dashboard() {
         refetchInterval: 10000
     });
 
-    // Merged online devices from all sources
     const { data: onlineData } = useQuery({
         queryKey: ['devices', 'online'],
         queryFn: () => axios.get('/api/v1/devices/online').then(res => res.data),
         refetchInterval: 10000
     });
 
-    const { data: onlineCountData } = useQuery({
+    const { data: counts } = useQuery({
         queryKey: ['devices', 'online', 'count'],
         queryFn: () => axios.get('/api/v1/devices/online/count').then(res => res.data),
         refetchInterval: 10000
@@ -53,16 +53,19 @@ export default function Dashboard() {
     const unreadCount = unreadAlerts?.unread_count || 0;
 
     const totalTracked = devices.length;
-    const totalOnline = onlineCountData?.total || 0;
     const offlineTracked = devices.filter(d => d.status === 'down').length;
 
-    // Critical devices: merge is_critical from tracked devices with merged online list
+    const totalOnline = counts?.total || 0;
+    const wiredCount = counts?.wired || 0;
+    const wirelessCount = counts?.wireless || 0;
+
     const criticalDevices = devices.filter(d => d.is_critical === 1);
     const criticalOnlineIPs = new Set(onlineDevices.filter(d => d.is_critical).map(d => d.ip));
     const criticalOffline = criticalDevices.filter(d => !criticalOnlineIPs.has(d.ip_address) && d.status === 'down').length;
 
     const pieData = [
-        { name: 'Online', value: totalOnline, color: '#22c55e' },
+        { name: 'Wired', value: wiredCount, color: '#22c55e' },
+        { name: 'WiFi', value: wirelessCount, color: '#06b6d4' },
         { name: 'Offline (tracked)', value: offlineTracked, color: '#ef4444' }
     ];
 
@@ -78,24 +81,52 @@ export default function Dashboard() {
         <Box>
             <Typography variant="h4" gutterBottom fontWeight="bold">Dashboard</Typography>
 
-            <Grid container spacing={3} sx={{ mb: 4 }}>
-                <Grid item xs={12} sm={6} md={2.4}>
+            {/* ── Online device split: Total / Wired / WiFi ── */}
+            <Grid container spacing={3} sx={{ mb: 1 }}>
+                <Grid item xs={12} sm={4}>
                     <StatCard
-                        title="Tracked Devices"
-                        value={totalTracked}
+                        title="Total Online"
+                        value={totalOnline}
                         color="#3b82f6"
-                        icon={<Computer />}
+                        icon={<DevicesIcon />}
                     />
                 </Grid>
-                <Grid item xs={12} sm={6} md={2.4}>
+                <Grid item xs={12} sm={4}>
                     <StatCard
-                        title="LAN Devices Online"
-                        value={totalOnline}
+                        title="Wired (LAN)"
+                        value={wiredCount}
+                        subtitle="directly connected"
                         color="#22c55e"
+                        icon={<EthernetIcon />}
+                    />
+                </Grid>
+                <Grid item xs={12} sm={4}>
+                    <StatCard
+                        title="Wireless (WiFi)"
+                        value={wirelessCount}
+                        subtitle="connected over WiFi"
+                        color="#06b6d4"
                         icon={<WifiIcon />}
                     />
                 </Grid>
-                <Grid item xs={12} sm={6} md={2.4}>
+            </Grid>
+
+            {/* Inline equation */}
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 3, pl: 1 }}>
+                Total Online = Wired <strong>{wiredCount}</strong> + WiFi <strong>{wirelessCount}</strong>
+            </Typography>
+
+            {/* ── Secondary stat row ── */}
+            <Grid container spacing={3} sx={{ mb: 4 }}>
+                <Grid item xs={12} sm={6} md={3}>
+                    <StatCard
+                        title="Tracked Devices"
+                        value={totalTracked}
+                        color="#8b5cf6"
+                        icon={<Computer />}
+                    />
+                </Grid>
+                <Grid item xs={12} sm={6} md={3}>
                     <StatCard
                         title="Tracked Offline"
                         value={offlineTracked}
@@ -103,7 +134,7 @@ export default function Dashboard() {
                         icon={<Cancel />}
                     />
                 </Grid>
-                <Grid item xs={12} sm={6} md={2.4}>
+                <Grid item xs={12} sm={6} md={3}>
                     <StatCard
                         title="Critical Offline"
                         value={criticalOffline}
@@ -112,7 +143,7 @@ export default function Dashboard() {
                         icon={<Warning />}
                     />
                 </Grid>
-                <Grid item xs={12} sm={6} md={2.4}>
+                <Grid item xs={12} sm={6} md={3}>
                     <StatCard
                         title="Active Alerts"
                         value={unreadCount}
@@ -125,7 +156,6 @@ export default function Dashboard() {
             <Grid container spacing={3}>
                 {/* Left Column */}
                 <Grid item xs={12} md={8}>
-
                     <Grid container spacing={3}>
                         <Grid item xs={12} md={6}>
                             <Card sx={{ p: 3, height: 350 }}>
@@ -206,10 +236,9 @@ export default function Dashboard() {
                             ))}
                         </Box>
                     </Card>
-
                 </Grid>
 
-                {/* Right Column — Critical Devices (using merged data) */}
+                {/* Right Column — Critical Devices */}
                 <Grid item xs={12} md={4}>
                     <Card sx={{ p: 3, height: '100%', minHeight: 400 }}>
                         <Typography variant="h6" gutterBottom color="error.main">Critical Devices</Typography>
@@ -222,7 +251,6 @@ export default function Dashboard() {
                                 <Typography color="text.secondary">No critical devices configured.</Typography>
                             }
                             {criticalDevices.map(device => {
-                                // Cross-reference with merged online list
                                 const mergedEntry = onlineDevices.find(d => d.ip === device.ip_address);
                                 const isOnline = !!mergedEntry || device.status === 'up';
                                 const latency = mergedEntry?.latency_ms ?? device.latency_ms;
@@ -230,9 +258,7 @@ export default function Dashboard() {
 
                                 return (
                                     <Box key={device.id} sx={{
-                                        p: 2,
-                                        mb: 2,
-                                        borderRadius: 1,
+                                        p: 2, mb: 2, borderRadius: 1,
                                         bgcolor: !isOnline ? 'rgba(239, 68, 68, 0.1)' : 'rgba(255,255,255,0.03)',
                                         borderLeft: `3px solid ${isOnline ? '#22c55e' : '#ef4444'}`
                                     }}>
@@ -276,6 +302,6 @@ export default function Dashboard() {
                     </Card>
                 </Grid>
             </Grid>
-        </Box >
+        </Box>
     );
 }
