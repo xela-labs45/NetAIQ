@@ -4,7 +4,7 @@ import { useQuery } from '@tanstack/react-query';
 import axios from 'axios';
 import StatCard from '../components/StatCard';
 import {
-    Computer, CheckCircle, Cancel, Warning, Error as ErrorIcon
+    Computer, CheckCircle, Cancel, Warning, Error as ErrorIcon, Wifi as WifiIcon
 } from '@mui/icons-material';
 import { PieChart, Pie, Cell, Tooltip as RechartsTooltip, ResponsiveContainer } from 'recharts';
 
@@ -12,6 +12,19 @@ export default function Dashboard() {
     const { data: devicesData } = useQuery({
         queryKey: ['devices'],
         queryFn: () => axios.get('/api/v1/devices').then(res => res.data),
+        refetchInterval: 10000
+    });
+
+    // Merged online devices from all sources
+    const { data: onlineData } = useQuery({
+        queryKey: ['devices', 'online'],
+        queryFn: () => axios.get('/api/v1/devices/online').then(res => res.data),
+        refetchInterval: 10000
+    });
+
+    const { data: onlineCountData } = useQuery({
+        queryKey: ['devices', 'online', 'count'],
+        queryFn: () => axios.get('/api/v1/devices/online/count').then(res => res.data),
         refetchInterval: 10000
     });
 
@@ -34,18 +47,23 @@ export default function Dashboard() {
     });
 
     const devices = devicesData?.devices || [];
+    const onlineDevices = onlineData?.devices || [];
     const segments = segmentsData?.segments || [];
     const recentAlerts = alertsData?.alerts?.slice(0, 10) || [];
     const unreadCount = unreadAlerts?.unread_count || 0;
 
-    const totalDevices = devices.length;
-    const onlineDevices = devices.filter(d => d.status === 'up').length;
-    const offlineDevices = devices.filter(d => d.status === 'down').length;
-    const criticalOffline = devices.filter(d => d.is_critical === 1 && d.status === 'down').length;
+    const totalTracked = devices.length;
+    const totalOnline = onlineCountData?.total || 0;
+    const offlineTracked = devices.filter(d => d.status === 'down').length;
+
+    // Critical devices: merge is_critical from tracked devices with merged online list
+    const criticalDevices = devices.filter(d => d.is_critical === 1);
+    const criticalOnlineIPs = new Set(onlineDevices.filter(d => d.is_critical).map(d => d.ip));
+    const criticalOffline = criticalDevices.filter(d => !criticalOnlineIPs.has(d.ip_address) && d.status === 'down').length;
 
     const pieData = [
-        { name: 'Online', value: onlineDevices, color: '#22c55e' },
-        { name: 'Offline', value: offlineDevices, color: '#ef4444' }
+        { name: 'Online', value: totalOnline, color: '#22c55e' },
+        { name: 'Offline (tracked)', value: offlineTracked, color: '#ef4444' }
     ];
 
     const getSeverityColor = (severity) => {
@@ -63,24 +81,24 @@ export default function Dashboard() {
             <Grid container spacing={3} sx={{ mb: 4 }}>
                 <Grid item xs={12} sm={6} md={2.4}>
                     <StatCard
-                        title="Total Devices"
-                        value={totalDevices}
+                        title="Tracked Devices"
+                        value={totalTracked}
                         color="#3b82f6"
                         icon={<Computer />}
                     />
                 </Grid>
                 <Grid item xs={12} sm={6} md={2.4}>
                     <StatCard
-                        title="Online Now"
-                        value={onlineDevices}
+                        title="LAN Devices Online"
+                        value={totalOnline}
                         color="#22c55e"
-                        icon={<CheckCircle />}
+                        icon={<WifiIcon />}
                     />
                 </Grid>
                 <Grid item xs={12} sm={6} md={2.4}>
                     <StatCard
-                        title="Offline"
-                        value={offlineDevices}
+                        title="Tracked Offline"
+                        value={offlineTracked}
                         color="#ef4444"
                         icon={<Cancel />}
                     />
@@ -191,7 +209,7 @@ export default function Dashboard() {
 
                 </Grid>
 
-                {/* Right Column */}
+                {/* Right Column — Critical Devices (using merged data) */}
                 <Grid item xs={12} md={4}>
                     <Card sx={{ p: 3, height: '100%', minHeight: 400 }}>
                         <Typography variant="h6" gutterBottom color="error.main">Critical Devices</Typography>
@@ -200,40 +218,53 @@ export default function Dashboard() {
                         </Typography>
 
                         <Box sx={{ mt: 2 }}>
-                            {devices.filter(d => d.is_critical === 1).length === 0 &&
+                            {criticalDevices.length === 0 &&
                                 <Typography color="text.secondary">No critical devices configured.</Typography>
                             }
-                            {devices.filter(d => d.is_critical === 1).map(device => (
-                                <Box key={device.id} sx={{
-                                    p: 2,
-                                    mb: 2,
-                                    borderRadius: 1,
-                                    bgcolor: device.status === 'down' ? 'rgba(239, 68, 68, 0.1)' : 'rgba(255,255,255,0.03)',
-                                    borderLeft: `3px solid ${device.status === 'up' ? '#22c55e' : device.status === 'down' ? '#ef4444' : '#888'}`
-                                }}>
-                                    <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
-                                        <Typography variant="subtitle2" fontWeight="bold">
-                                            {device.hostname || device.ip_address}
+                            {criticalDevices.map(device => {
+                                // Cross-reference with merged online list
+                                const mergedEntry = onlineDevices.find(d => d.ip === device.ip_address);
+                                const isOnline = !!mergedEntry || device.status === 'up';
+                                const latency = mergedEntry?.latency_ms ?? device.latency_ms;
+                                const source = mergedEntry?.source;
+
+                                return (
+                                    <Box key={device.id} sx={{
+                                        p: 2,
+                                        mb: 2,
+                                        borderRadius: 1,
+                                        bgcolor: !isOnline ? 'rgba(239, 68, 68, 0.1)' : 'rgba(255,255,255,0.03)',
+                                        borderLeft: `3px solid ${isOnline ? '#22c55e' : '#ef4444'}`
+                                    }}>
+                                        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
+                                            <Typography variant="subtitle2" fontWeight="bold">
+                                                {device.hostname || device.ip_address}
+                                            </Typography>
+                                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                                                {source && (
+                                                    <Chip label={source} size="small" variant="outlined"
+                                                        sx={{ height: 18, fontSize: '0.65rem', opacity: 0.7 }} />
+                                                )}
+                                                {isOnline ? (
+                                                    <Box sx={{
+                                                        width: 10, height: 10, borderRadius: '50%', bgcolor: 'success.main',
+                                                        boxShadow: '0 0 8px #22c55e',
+                                                        animation: 'pulse 2s infinite'
+                                                    }} />
+                                                ) : (
+                                                    <Box sx={{ width: 10, height: 10, borderRadius: '50%', bgcolor: 'error.main' }} />
+                                                )}
+                                            </Box>
+                                        </Box>
+                                        <Typography variant="caption" display="block" color="text.secondary">
+                                            IP: {device.ip_address}
                                         </Typography>
-                                        {device.status === 'up' && (
-                                            <Box sx={{
-                                                width: 10, height: 10, borderRadius: '50%', bgcolor: 'success.main',
-                                                boxShadow: '0 0 8px #22c55e',
-                                                animation: 'pulse 2s infinite'
-                                            }} />
-                                        )}
-                                        {device.status === 'down' && (
-                                            <Box sx={{ width: 10, height: 10, borderRadius: '50%', bgcolor: 'error.main' }} />
-                                        )}
+                                        <Typography variant="caption" display="block" color="text.secondary">
+                                            Latency: {latency != null ? `${latency} ms` : 'N/A'}
+                                        </Typography>
                                     </Box>
-                                    <Typography variant="caption" display="block" color="text.secondary">
-                                        IP: {device.ip_address}
-                                    </Typography>
-                                    <Typography variant="caption" display="block" color="text.secondary">
-                                        Latency: {device.latency_ms !== null ? `${device.latency_ms} ms` : 'N/A'}
-                                    </Typography>
-                                </Box>
-                            ))}
+                                );
+                            })}
                         </Box>
                         <style>{`
               @keyframes pulse {

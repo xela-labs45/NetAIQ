@@ -1,10 +1,22 @@
 const db = require('../db/database');
 const { pingDevice } = require('../services/pingService');
+const { mergeOnlineDevices, getOnlineCount } = require('../services/mergeService');
 
 module.exports = async function (fastify, opts) {
 
     // Protect all device routes
     fastify.addHook('preValidation', fastify.authenticate);
+
+    // ── Merged online devices (must be before /:id routes) ──
+    fastify.get('/online', async (request, reply) => {
+        const devices = await mergeOnlineDevices();
+        reply.send({ devices });
+    });
+
+    fastify.get('/online/count', async (request, reply) => {
+        const counts = await getOnlineCount();
+        reply.send(counts);
+    });
 
     fastify.get('/', async (request, reply) => {
         // Get all devices with their latest status and segment details

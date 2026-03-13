@@ -33,6 +33,13 @@ export default function Devices() {
     queryFn: () => axios.get('/api/v1/segments').then(res => res.data)
   });
 
+  // Merged online devices for cross-referencing status
+  const { data: onlineData } = useQuery({
+    queryKey: ['devices', 'online'],
+    queryFn: () => axios.get('/api/v1/devices/online').then(res => res.data),
+    refetchInterval: 10000
+  });
+
   const { data: deviceHistory } = useQuery({
     queryKey: ['deviceHistory', selectedDevice?.id],
     queryFn: () => axios.get(`/api/v1/devices/${selectedDevice.id}/history?hours=24`).then(res => res.data),
@@ -126,20 +133,42 @@ export default function Devices() {
     setDrawerOpen(true);
   };
 
+  const devices = devicesData?.devices || [];
+  const segments = segmentsData?.segments || [];
+
+  // Build IP → merged-online-entry lookup
+  const onlineLookup = React.useMemo(() => {
+    const map = new Map();
+    for (const d of (onlineData?.devices || [])) {
+      map.set(d.ip, d);
+    }
+    return map;
+  }, [onlineData]);
+
   const columns = [
     {
       field: 'status',
       headerName: 'Status',
       width: 80,
-      renderCell: (params) => (
-        <Box sx={{ display: 'flex', alignItems: 'center', height: '100%', pl: 2 }}>
-          <Box sx={{
-            width: 12, height: 12, borderRadius: '50%',
-            bgcolor: params.value === 'up' ? 'success.main' : params.value === 'down' ? 'error.main' : 'warning.main',
-            boxShadow: params.value === 'up' ? '0 0 8px #22c55e' : 'none'
-          }} />
-        </Box>
-      )
+      renderCell: (params) => {
+        // Cross-reference with merged online list
+        const onlineMap = onlineLookup;
+        const mergedEntry = onlineMap.get(params.row.ip_address);
+        const effectiveStatus = mergedEntry ? 'up' : (params.value || null);
+        return (
+          <Box sx={{ display: 'flex', alignItems: 'center', height: '100%', pl: 2, gap: 1 }}>
+            <Box sx={{
+              width: 12, height: 12, borderRadius: '50%',
+              bgcolor: effectiveStatus === 'up' ? 'success.main' : effectiveStatus === 'down' ? 'error.main' : 'warning.main',
+              boxShadow: effectiveStatus === 'up' ? '0 0 8px #22c55e' : 'none'
+            }} />
+            {mergedEntry && mergedEntry.source !== 'ping' && (
+              <Chip label={mergedEntry.source} size="small" variant="outlined"
+                sx={{ height: 16, fontSize: '0.6rem', opacity: 0.6 }} />
+            )}
+          </Box>
+        );
+      }
     },
     { field: 'hostname', headerName: 'Hostname', flex: 1 },
     { field: 'ip_address', headerName: 'IP Address', flex: 1 },
@@ -190,8 +219,6 @@ export default function Devices() {
     }
   ];
 
-  const devices = devicesData?.devices || [];
-  const segments = segmentsData?.segments || [];
 
   return (
     <Box sx={{ height: 'calc(100vh - 100px)', display: 'flex', flexDirection: 'column' }}>
