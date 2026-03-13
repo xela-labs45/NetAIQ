@@ -2,9 +2,12 @@ import React, { useState, useEffect } from 'react';
 import {
     Box, Typography, Button, TextField, Grid, Card, Checkbox, Switch,
     FormControlLabel, Tabs, Tab, Alert, Snackbar, InputAdornment, IconButton,
-    MenuItem
+    MenuItem, Chip, CircularProgress
 } from '@mui/material';
-import { Visibility, VisibilityOff, Save as SaveIcon, PlayArrow as TestIcon } from '@mui/icons-material';
+import {
+    Visibility, VisibilityOff, Save as SaveIcon, PlayArrow as TestIcon,
+    CheckCircle as ConnectedIcon, Error as ErrorIcon, HelpOutline as UnknownIcon
+} from '@mui/icons-material';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import axios from 'axios';
 import { useAuth } from '../hooks/useAuth';
@@ -18,12 +21,21 @@ function TabPanel(props) {
     );
 }
 
+// Connection status chip shown next to the UniFi tab title
+function UnifiStatusChip({ status }) {
+    if (status === 'connected') return <Chip icon={<ConnectedIcon />} label="Connected" color="success" size="small" sx={{ ml: 1 }} />;
+    if (status === 'error') return <Chip icon={<ErrorIcon />} label="Error" color="error" size="small" sx={{ ml: 1 }} />;
+    if (status === 'testing') return <Chip icon={<CircularProgress size={12} />} label="Testing…" size="small" sx={{ ml: 1 }} />;
+    return null;
+}
+
 export default function Settings() {
     const queryClient = useQueryClient();
     const { user } = useAuth();
     const [tabIndex, setTabIndex] = useState(0);
     const [showPassword, setShowPassword] = useState(false);
     const [toast, setToast] = useState({ open: false, message: '', severity: 'info' });
+    const [unifiStatus, setUnifiStatus] = useState(null); // null | 'testing' | 'connected' | 'error'
 
     // Forms state
     const [unifi, setUnifi] = useState({
@@ -44,29 +56,46 @@ export default function Settings() {
         current_password: '', new_password: '', confirm_password: ''
     });
 
-    // Fetch settings
-    useQuery({
+    // Fetch settings — use the returned data object directly (TanStack Query v5 removed onSuccess)
+    const { data: settingsData } = useQuery({
         queryKey: ['settings'],
         queryFn: () => axios.get('/api/v1/settings').then(res => res.data),
-        onSuccess: (data) => {
-            const s = data.settings;
-            if (!s) return;
-
-            setUnifi(prev => ({ ...prev, ...s, unifi_ssl_verify: s.unifi_ssl_verify === '1' }));
-
-            setEmail(prev => ({
-                ...prev,
-                ...s,
-                smtp_secure: s.smtp_secure === '1',
-                alert_on_offline: s.alert_on_offline === '1',
-                alert_on_critical_offline: s.alert_on_critical_offline === '1',
-                alert_on_online: s.alert_on_online === '1',
-                alert_on_high_latency: s.alert_on_high_latency === '1'
-            }));
-
-            setPolling(prev => ({ ...prev, ...s }));
-        }
     });
+
+    // Populate forms whenever settings data loads
+    useEffect(() => {
+        const s = settingsData?.settings;
+        if (!s) return;
+
+        setUnifi({
+            unifi_url: s.unifi_url || '',
+            unifi_username: s.unifi_username || '',
+            // Show masked placeholder if a password is stored, but keep it editable
+            unifi_password: s.unifi_password || '',
+            unifi_site: s.unifi_site || 'default',
+            unifi_ssl_verify: s.unifi_ssl_verify === '1',
+        });
+
+        setEmail({
+            smtp_host: s.smtp_host || '',
+            smtp_port: s.smtp_port || '587',
+            smtp_secure: s.smtp_secure === '1',
+            smtp_user: s.smtp_user || '',
+            smtp_pass: s.smtp_pass || '',
+            alert_from: s.alert_from || '',
+            alert_to: s.alert_to || '',
+            alert_on_offline: s.alert_on_offline !== '0',
+            alert_on_critical_offline: s.alert_on_critical_offline !== '0',
+            alert_on_online: s.alert_on_online !== '0',
+            alert_on_high_latency: s.alert_on_high_latency === '1',
+        });
+
+        setPolling({
+            ping_interval_ms: s.ping_interval_ms || '60000',
+            unifi_interval_ms: s.unifi_interval_ms || '300000',
+            alert_cooldown_ms: s.alert_cooldown_ms || '900000',
+        });
+    }, [settingsData]);
 
     const showToast = (message, severity = 'success') => {
         setToast({ open: true, message, severity });
@@ -75,17 +104,23 @@ export default function Settings() {
     // Mutations
     const saveUnifi = useMutation({
         mutationFn: (data) => axios.put('/api/v1/settings/unifi', data),
-        onSuccess: () => showToast('UniFi settings saved successfully')
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: ['settings'] });
+            showToast('UniFi settings saved successfully');
+        }
     });
 
     const saveEmail = useMutation({
         mutationFn: (data) => axios.put('/api/v1/settings/email', data),
-        onSuccess: () => showToast('Email settings saved successfully')
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: ['settings'] });
+            showToast('Email settings saved successfully');
+        }
     });
 
     const savePolling = useMutation({
         mutationFn: (data) => axios.put('/api/v1/settings/polling', data),
-        onSuccess: () => showToast('Polling settings saved successfully. Jobs restarted.')
+        onSuccess: () => showToast('Polling settings saved. Jobs restarted.')
     });
 
     const changePassword = useMutation({
@@ -99,8 +134,15 @@ export default function Settings() {
 
     const testUnifi = useMutation({
         mutationFn: () => axios.post('/api/v1/settings/test-unifi'),
-        onSuccess: (res) => showToast(res.data.message),
-        onError: (err) => showToast(err.response?.data?.message || 'Connection failed', 'error')
+        onMutate: () => setUnifiStatus('testing'),
+        onSuccess: (res) => {
+            setUnifiStatus('connected');
+            showToast(res.data.message);
+        },
+        onError: (err) => {
+            setUnifiStatus('error');
+            showToast(err.response?.data?.message || 'Connection failed', 'error');
+        }
     });
 
     const testEmail = useMutation({
@@ -121,6 +163,9 @@ export default function Settings() {
         });
     };
 
+    // Determine if a password placeholder is being shown (masked by backend)
+    const isUnifiPasswordMasked = unifi.unifi_password === '••••••••';
+
     return (
         <Box>
             <Typography variant="h4" fontWeight="bold" gutterBottom>Settings</Typography>
@@ -128,7 +173,12 @@ export default function Settings() {
             <Card sx={{ mt: 3 }}>
                 <Box sx={{ borderBottom: 1, borderColor: 'divider' }}>
                     <Tabs value={tabIndex} onChange={(e, v) => setTabIndex(v)} aria-label="settings tabs">
-                        <Tab label="UniFi Controller" />
+                        <Tab label={
+                            <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                                UniFi Controller
+                                <UnifiStatusChip status={unifiStatus} />
+                            </Box>
+                        } />
                         <Tab label="Email Alerts" />
                         <Tab label="Polling Intervals" />
                         <Tab label="Account" />
@@ -148,19 +198,26 @@ export default function Settings() {
                             <Grid item xs={12}>
                                 <TextField
                                     fullWidth label="Controller URL (e.g. https://192.168.1.6)"
-                                    value={unifi.unifi_url} onChange={(e) => setUnifi({ ...unifi, unifi_url: e.target.value })}
+                                    value={unifi.unifi_url}
+                                    onChange={(e) => setUnifi({ ...unifi, unifi_url: e.target.value })}
                                 />
                             </Grid>
                             <Grid item xs={12} sm={6}>
                                 <TextField
                                     fullWidth label="Username"
-                                    value={unifi.unifi_username} onChange={(e) => setUnifi({ ...unifi, unifi_username: e.target.value })}
+                                    value={unifi.unifi_username}
+                                    onChange={(e) => setUnifi({ ...unifi, unifi_username: e.target.value })}
                                 />
                             </Grid>
                             <Grid item xs={12} sm={6}>
                                 <TextField
-                                    fullWidth label="Password" type={showPassword ? 'text' : 'password'}
-                                    value={unifi.unifi_password} onChange={(e) => setUnifi({ ...unifi, unifi_password: e.target.value })}
+                                    fullWidth
+                                    label="Password"
+                                    type={showPassword ? 'text' : 'password'}
+                                    value={unifi.unifi_password}
+                                    placeholder={isUnifiPasswordMasked ? 'Password saved — enter new to change' : ''}
+                                    onChange={(e) => setUnifi({ ...unifi, unifi_password: e.target.value })}
+                                    helperText={isUnifiPasswordMasked ? 'A password is already saved.' : ''}
                                     InputProps={{
                                         endAdornment: (
                                             <InputAdornment position="end">
@@ -175,7 +232,8 @@ export default function Settings() {
                             <Grid item xs={12} sm={6}>
                                 <TextField
                                     fullWidth label="Site Name"
-                                    value={unifi.unifi_site} onChange={(e) => setUnifi({ ...unifi, unifi_site: e.target.value })}
+                                    value={unifi.unifi_site}
+                                    onChange={(e) => setUnifi({ ...unifi, unifi_site: e.target.value })}
                                     helperText="Usually 'default'"
                                 />
                             </Grid>
@@ -188,13 +246,36 @@ export default function Settings() {
                                     If using a self-signed cert on UDM, leave this unchecked.
                                 </Typography>
                             </Grid>
+
+                            {/* Connection status info box */}
+                            {unifi.unifi_url && (
+                                <Grid item xs={12}>
+                                    <Box sx={{
+                                        p: 2, borderRadius: 1,
+                                        bgcolor: unifiStatus === 'connected' ? 'success.main' : unifiStatus === 'error' ? 'error.main' : 'rgba(255,255,255,0.05)',
+                                        opacity: unifiStatus ? 1 : 0.7,
+                                        display: 'flex', alignItems: 'center', gap: 1
+                                    }}>
+                                        {unifiStatus === 'connected' && <ConnectedIcon fontSize="small" />}
+                                        {unifiStatus === 'error' && <ErrorIcon fontSize="small" />}
+                                        {!unifiStatus && <UnknownIcon fontSize="small" />}
+                                        <Typography variant="body2">
+                                            {unifiStatus === 'connected' && `Connected to ${unifi.unifi_url}`}
+                                            {unifiStatus === 'error' && 'Could not connect — check your URL and credentials'}
+                                            {unifiStatus === 'testing' && 'Testing connection…'}
+                                            {!unifiStatus && `Target: ${unifi.unifi_url} — click "Test Connection" to verify`}
+                                        </Typography>
+                                    </Box>
+                                </Grid>
+                            )}
                         </Grid>
+
                         <Box sx={{ mt: 4, display: 'flex', gap: 2 }}>
-                            <Button variant="contained" startIcon={<SaveIcon />} onClick={() => saveUnifi.mutate(unifi)}>
-                                Save Settings
+                            <Button variant="contained" startIcon={<SaveIcon />} onClick={() => saveUnifi.mutate(unifi)} disabled={saveUnifi.isPending}>
+                                {saveUnifi.isPending ? 'Saving…' : 'Save Settings'}
                             </Button>
                             <Button variant="outlined" startIcon={<TestIcon />} onClick={() => testUnifi.mutate()} disabled={testUnifi.isPending}>
-                                {testUnifi.isPending ? 'Testing...' : 'Test Connection'}
+                                {testUnifi.isPending ? 'Testing…' : 'Test Connection'}
                             </Button>
                         </Box>
                     </Box>
@@ -215,7 +296,12 @@ export default function Settings() {
                                 <TextField fullWidth label="SMTP Username" value={email.smtp_user} onChange={(e) => setEmail({ ...email, smtp_user: e.target.value })} />
                             </Grid>
                             <Grid item xs={12} sm={6}>
-                                <TextField fullWidth label="SMTP Password" type="password" value={email.smtp_pass} onChange={(e) => setEmail({ ...email, smtp_pass: e.target.value })} />
+                                <TextField
+                                    fullWidth label="SMTP Password" type="password"
+                                    value={email.smtp_pass}
+                                    helperText={email.smtp_pass === '••••••••' ? 'A password is already saved.' : ''}
+                                    onChange={(e) => setEmail({ ...email, smtp_pass: e.target.value })}
+                                />
                             </Grid>
                             <Grid item xs={12}>
                                 <FormControlLabel
@@ -246,9 +332,11 @@ export default function Settings() {
                         </Box>
 
                         <Box sx={{ display: 'flex', gap: 2 }}>
-                            <Button variant="contained" startIcon={<SaveIcon />} onClick={() => saveEmail.mutate(email)}>Save Settings</Button>
+                            <Button variant="contained" startIcon={<SaveIcon />} onClick={() => saveEmail.mutate(email)} disabled={saveEmail.isPending}>
+                                {saveEmail.isPending ? 'Saving…' : 'Save Settings'}
+                            </Button>
                             <Button variant="outlined" startIcon={<TestIcon />} onClick={() => testEmail.mutate()} disabled={testEmail.isPending}>
-                                {testEmail.isPending ? 'Sending...' : 'Send Test Email'}
+                                {testEmail.isPending ? 'Sending…' : 'Send Test Email'}
                             </Button>
                         </Box>
                     </Box>
@@ -293,7 +381,9 @@ export default function Settings() {
                             </Grid>
                         </Grid>
                         <Box sx={{ mt: 4 }}>
-                            <Button variant="contained" startIcon={<SaveIcon />} onClick={() => savePolling.mutate(polling)}>Save and Restart Jobs</Button>
+                            <Button variant="contained" startIcon={<SaveIcon />} onClick={() => savePolling.mutate(polling)} disabled={savePolling.isPending}>
+                                {savePolling.isPending ? 'Saving…' : 'Save and Restart Jobs'}
+                            </Button>
                         </Box>
                     </Box>
                 </TabPanel>
@@ -322,7 +412,9 @@ export default function Settings() {
                                 value={passwordForm.confirm_password} onChange={(e) => setPasswordForm({ ...passwordForm, confirm_password: e.target.value })}
                             />
                             <Box sx={{ mt: 2 }}>
-                                <Button variant="contained" type="submit" disabled={changePassword.isPending}>Update Password</Button>
+                                <Button variant="contained" type="submit" disabled={changePassword.isPending}>
+                                    {changePassword.isPending ? 'Updating…' : 'Update Password'}
+                                </Button>
                             </Box>
                         </form>
                     </Box>
