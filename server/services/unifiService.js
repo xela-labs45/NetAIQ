@@ -41,22 +41,21 @@ async function authenticate() {
         });
 
         const setCookieHeader = response.headers['set-cookie'];
-        let sessionCookie = null;
-        if (setCookieHeader) {
-            const tokenCookie = setCookieHeader.find(c => c.startsWith('TOKEN='));
-            if (tokenCookie) {
-                sessionCookie = tokenCookie.split(';')[0].split('=')[1];
-            }
+        let cookieString = '';
+        if (setCookieHeader && Array.isArray(setCookieHeader)) {
+            cookieString = setCookieHeader.map(c => c.split(';')[0]).join('; ');
+        } else if (setCookieHeader && typeof setCookieHeader === 'string') {
+            cookieString = setCookieHeader.split(';')[0];
         }
 
-        const csrfToken = response.headers['x-csrf-token'];
+        const csrfToken = response.headers['x-csrf-token'] || '';
 
-        if (!sessionCookie || !csrfToken) {
-            throw new Error('Failed to extract session or CSRF token from UniFi login');
+        if (!cookieString) {
+            throw new Error('Failed to extract session cookies from UniFi login');
         }
 
         sessionCache = {
-            sessionCookie,
+            cookieString,
             csrfToken,
             expiresAt: Date.now() + 3600000 // 1 hour
         };
@@ -84,10 +83,12 @@ async function makeRequest(method, endpoint, data = null, retry = true) {
     });
 
     const headers = {
-        'Cookie': `TOKEN=${sessionCache.sessionCookie}`,
-        'X-CSRF-Token': sessionCache.csrfToken,
+        'Cookie': sessionCache.cookieString || '',
         'Content-Type': 'application/json'
     };
+    if (sessionCache.csrfToken) {
+        headers['X-CSRF-Token'] = sessionCache.csrfToken;
+    }
 
     try {
         const config = { method, url, headers, httpsAgent };

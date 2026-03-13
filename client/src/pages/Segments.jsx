@@ -19,6 +19,7 @@ export default function Segments() {
   const [formData, setFormData] = useState({ name: '', cidr: '', description: '', color: '#3b82f6' });
   const [scanProgress, setScanProgress] = useState({}); // { [segmentId]: { scanned, total, status, current_ip } }
   const [expandedScans, setExpandedScans] = useState({});
+  const [localScans, setLocalScans] = useState({});
 
   useEffect(() => {
     if (socket) {
@@ -36,7 +37,12 @@ export default function Segments() {
           return newState;
         });
         queryClient.invalidateQueries(['segments']);
-        queryClient.invalidateQueries(['scans', data.segment_id]);
+        // Auto-refresh the expanded scans if it's currently open
+        if (expandedScans[data.segment_id]) {
+          fetchScans(data.segment_id).then(scans => {
+            setLocalScans(prev => ({ ...prev, [data.segment_id]: scans }));
+          });
+        }
       };
 
       socket.on('scan:progress', handleProgress);
@@ -95,7 +101,7 @@ export default function Segments() {
 
     if (!isExpanded) {
       const scans = await fetchScans(id);
-      queryClient.setQueryData(['scans', id], scans);
+      setLocalScans(prev => ({ ...prev, [id]: scans }));
     }
   };
 
@@ -179,7 +185,7 @@ export default function Segments() {
                   </AccordionSummary>
                   <AccordionDetails sx={{ p: 1, maxHeight: 200, overflowY: 'auto' }}>
                     {(() => {
-                      const scans = queryClient.getQueryData(['scans', seg.id]) || [];
+                      const scans = localScans[seg.id] || [];
                       if (scans.length === 0) return <Typography variant="caption" color="text.secondary">No scans yet.</Typography>;
 
                       return scans.map(s => (

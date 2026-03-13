@@ -93,6 +93,7 @@ const start = async () => {
     // Start background jobs after server is up
     require('./jobs/pingJob')(fastify);
     require('./jobs/unifiJob')(fastify);
+    require('./jobs/scanJob')(fastify);
 
   } catch (err) {
     fastify.log.error(err);
