@@ -21,6 +21,23 @@ module.exports = async function (fastify, opts) {
         }
     });
 
+    fastify.get('/clients-usage', async (request, reply) => {
+        try {
+            const { start, end } = request.query;
+            const startTime = parseInt(start, 10) || new Date().setHours(0, 0, 0, 0);
+            const endTime = parseInt(end, 10) || Date.now();
+
+            // if range > 3 days, use weekly
+            const type = (endTime - startTime) > (3 * 86400000) ? 'weekly' : 'daily';
+
+            const data = await unifiService.getClientsUsage(startTime, endTime, type);
+            reply.send(data || { data: [] });
+        } catch (err) {
+            console.error('clients-usage error', err);
+            reply.code(500).send({ error: true, message: err.message });
+        }
+    });
+
     fastify.get('/health', async (request, reply) => {
         try {
             const data = await unifiService.getSiteHealth();

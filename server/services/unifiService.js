@@ -152,6 +152,16 @@ async function getDailyUserReport(mac, start, end) {
     return makeRequest('POST', '/stat/report/daily.user', body);
 }
 
+async function getClientsUsage(start, end, type = 'daily') {
+    const body = {
+        attrs: ["tx_bytes", "rx_bytes"],
+        start,
+        end
+    };
+    const endpoint = type === 'weekly' ? '/stat/report/weekly.user' : '/stat/report/daily.user';
+    return makeRequest('POST', endpoint, body);
+}
+
 async function getHourlySiteReport(start, end) {
     const body = {
         attrs: ["wan-tx_bytes", "wan-rx_bytes", "time"],
@@ -174,6 +184,7 @@ module.exports = {
     getDevices,
     getSiteHealth,
     getDailyUserReport,
+    getClientsUsage,
     getHourlySiteReport,
     getWanStats,
     authenticate

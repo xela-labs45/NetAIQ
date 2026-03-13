@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Box, Typography, Grid, Card, CircularProgress, Alert } from '@mui/material';
+import { Box, Typography, Grid, Card, CircularProgress, Alert, ToggleButton, ToggleButtonGroup, Paper } from '@mui/material';
 import { useQuery } from '@tanstack/react-query';
 import axios from 'axios';
 import { AreaChart, Area, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer, Legend } from 'recharts';
@@ -8,15 +8,27 @@ import { Router as RouterIcon } from '@mui/icons-material';
 
 export default function Bandwidth() {
 
+  const [timeRange, setTimeRange] = useState('today'); // 'today', '24h', '7d'
+
   const { data: wanData, isLoading: wanLoading, error: wanError } = useQuery({
     queryKey: ['unifi', 'wan'],
     queryFn: () => axios.get('/api/v1/unifi/wan').then(res => res.data),
     refetchInterval: 60000
   });
 
-  const { data: clientsData } = useQuery({
-    queryKey: ['unifi', 'clients'],
-    queryFn: () => axios.get('/api/v1/unifi/clients').then(res => res.data),
+  const { data: clientsUsageData } = useQuery({
+    queryKey: ['unifi', 'clients-usage', timeRange],
+    queryFn: () => {
+      let start, end = Date.now();
+      if (timeRange === 'today') {
+        start = new Date().setHours(0, 0, 0, 0);
+      } else if (timeRange === '24h') {
+        start = end - 86400000;
+      } else if (timeRange === '7d') {
+        start = end - 604800000;
+      }
+      return axios.get(`/api/v1/unifi/clients-usage?start=${start}&end=${end}`).then(res => res.data);
+    },
     refetchInterval: 60000
   });
 
@@ -40,17 +52,40 @@ export default function Bandwidth() {
   };
 
   const getTopClients = () => {
-    if (!clientsData?.data) return [];
-    return [...clientsData.data]
+    if (!clientsUsageData?.data) return [];
+    return [...clientsUsageData.data]
       .filter(c => c.tx_bytes > 0 || c.rx_bytes > 0)
-      .map(c => ({
-        name: c.hostname || c.name || c.mac,
-        totalRate: c.tx_bytes + c.rx_bytes,
-        tx: c.tx_bytes,
-        rx: c.rx_bytes
-      }))
+      .map(c => {
+        let name = c.hostname || c.name || c.ip || c.mac || 'Unknown';
+        let truncatedName = name.length > 18 ? name.slice(0, 16) + '…' : name;
+        return {
+          originalName: name,
+          name: truncatedName,
+          mac: c.mac || 'N/A',
+          ip: c.ip || 'N/A',
+          totalRate: c.tx_bytes + c.rx_bytes,
+          tx: c.tx_bytes,
+          rx: c.rx_bytes
+        };
+      })
       .sort((a, b) => b.totalRate - a.totalRate)
       .slice(0, 10);
+  };
+
+  const CustomTooltip = ({ active, payload, label }) => {
+    if (active && payload && payload.length) {
+      const data = payload[0].payload;
+      return (
+        <Paper sx={{ p: 2, bgcolor: '#1e293b', color: '#fff', border: '1px solid #3b82f6' }}>
+          <Typography variant="subtitle2" fontWeight="bold" gutterBottom>{data.originalName}</Typography>
+          <Typography variant="body2" color="text.secondary">IP: {data.ip}</Typography>
+          <Typography variant="body2" color="text.secondary" gutterBottom>MAC: {data.mac}</Typography>
+          <Typography variant="body2" sx={{ color: '#8b5cf6' }}>Upload: {formatBytes(data.tx)}</Typography>
+          <Typography variant="body2" sx={{ color: '#3b82f6' }}>Download: {formatBytes(data.rx)}</Typography>
+        </Paper>
+      );
+    }
+    return null;
   };
 
   const formatHourlyData = () => {
@@ -160,17 +195,27 @@ export default function Bandwidth() {
       <Grid container spacing={3}>
         <Grid item xs={12}>
           <Card sx={{ p: 3, minHeight: 400 }}>
-            <Typography variant="h6" gutterBottom>Top Clients by Current Usage</Typography>
+            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
+              <Typography variant="h6">Top Clients by Usage</Typography>
+              <ToggleButtonGroup
+                color="primary"
+                value={timeRange}
+                exclusive
+                onChange={(e, val) => val && setTimeRange(val)}
+                size="small"
+              >
+                <ToggleButton value="today">Today</ToggleButton>
+                <ToggleButton value="24h">24h</ToggleButton>
+                <ToggleButton value="7d">7 Days</ToggleButton>
+              </ToggleButtonGroup>
+            </Box>
             <Box sx={{ height: 350 }}>
               <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={getTopClients()} layout="vertical" margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
+                <BarChart data={getTopClients()} layout="vertical" margin={{ top: 5, right: 30, left: 10, bottom: 5 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.1)" horizontal={false} />
                   <XAxis type="number" tickFormatter={(tick) => formatBytes(tick)} stroke="#888" />
-                  <YAxis type="category" dataKey="name" width={150} stroke="#888" />
-                  <RechartsTooltip
-                    formatter={(value) => formatBytes(value)}
-                    contentStyle={{ backgroundColor: '#111827', borderColor: '#3b82f6' }}
-                  />
+                  <YAxis type="category" dataKey="name" width={160} interval={0} tick={{ fontSize: 11 }} stroke="#888" />
+                  <RechartsTooltip content={<CustomTooltip />} />
                   <Legend />
                   <Bar dataKey="rx" name="Download (RX)" stackId="a" fill="#3b82f6" />
                   <Bar dataKey="tx" name="Upload (TX)" stackId="a" fill="#8b5cf6" />
