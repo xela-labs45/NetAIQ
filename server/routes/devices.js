@@ -9,7 +9,15 @@ module.exports = async function (fastify, opts) {
 
     // ── Merged online devices (must be before /:id routes) ──
     fastify.get('/online', async (request, reply) => {
-        const devices = await mergeOnlineDevices();
+        const { connection } = request.query || {};
+        let devices = await mergeOnlineDevices();
+
+        if (connection === 'wired') {
+            devices = devices.filter(d => d.is_wired === true);
+        } else if (connection === 'wireless') {
+            devices = devices.filter(d => d.is_wired === false);
+        }
+
         reply.send({ devices });
     });
 
@@ -31,6 +39,67 @@ module.exports = async function (fastify, opts) {
     `).all();
 
         reply.send({ devices });
+    });
+
+    fastify.post('/bulk', async (request, reply) => {
+        const { devices } = request.body;
+        if (!Array.isArray(devices)) {
+            return reply.code(400).send({ error: true, message: 'Expected an array of devices' });
+        }
+
+        let registered = 0;
+        let skipped = 0;
+        const errors = [];
+
+        // Check for existing segments if you want, or just leave segment_id null
+        // Doing simple approach as requested.
+        const insertStmt = db.prepare(`
+            INSERT INTO devices (hostname, ip_address, mac_address, device_type, is_critical, notes)
+            VALUES (?, ?, ?, 'workstation', 0, 'Auto-registered from live scan')
+        `);
+
+        // Check existing ones
+        const checkIpStmt = db.prepare('SELECT id FROM devices WHERE ip_address = ?');
+        const checkMacStmt = db.prepare('SELECT id FROM devices WHERE lower(mac_address) = lower(?)');
+
+        const tx = db.transaction((devicesList) => {
+            for (const d of devicesList) {
+                if (!d.ip) {
+                    skipped++;
+                    continue;
+                }
+
+                // Skip if IP exists
+                if (checkIpStmt.get(d.ip)) {
+                    skipped++;
+                    continue;
+                }
+
+                // Skip if MAC exists
+                if (d.mac && checkMacStmt.get(d.mac)) {
+                    skipped++;
+                    continue;
+                }
+
+                try {
+                    const info = insertStmt.run(d.hostname || null, d.ip, d.mac || null);
+
+                    const newDevice = db.prepare('SELECT * FROM devices WHERE id = ?').get(info.lastInsertRowid);
+                    // Initial ping asynchronously
+                    setImmediate(() => {
+                        pingDevice(newDevice, fastify).catch(e => fastify.log.error(e));
+                    });
+
+                    registered++;
+                } catch (err) {
+                    errors.push({ ip: d.ip, error: err.message });
+                }
+            }
+        });
+
+        tx(devices);
+
+        reply.send({ registered, skipped, errors });
     });
 
     fastify.post('/', async (request, reply) => {

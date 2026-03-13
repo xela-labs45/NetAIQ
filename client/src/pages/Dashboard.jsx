@@ -4,6 +4,7 @@ import { Box, Typography, Grid, Card, Chip, LinearProgress, Link } from '@mui/ma
 import { useQuery } from '@tanstack/react-query';
 import axios from 'axios';
 import StatCard from '../components/StatCard';
+import LiveDevicesModal from '../components/LiveDevicesModal';
 import {
     Computer, Warning,
     Wifi as WifiIcon, SettingsEthernet as EthernetIcon, Devices as DevicesIcon,
@@ -13,6 +14,14 @@ import {
 import { PieChart, Pie, Cell, Tooltip as RechartsTooltip, ResponsiveContainer } from 'recharts';
 
 export default function Dashboard() {
+    const [liveModalOpen, setLiveModalOpen] = React.useState(false);
+    const [liveModalTab, setLiveModalTab] = React.useState('all');
+
+    const handleOpenLiveModal = (tab) => {
+        setLiveModalTab(tab);
+        setLiveModalOpen(true);
+    };
+
     const { data: devicesData } = useQuery({
         queryKey: ['devices'],
         queryFn: () => axios.get('/api/v1/devices').then(res => res.data),
@@ -114,6 +123,8 @@ export default function Dashboard() {
                         subtitle="across all segments"
                         color="#3b82f6"
                         icon={<DevicesIcon />}
+                        onClick={() => handleOpenLiveModal('all')}
+                        hoverColor="rgba(59, 130, 246, 0.5)"
                     />
                 </Grid>
                 <Grid item xs={12} sm={6} md={3}>
@@ -123,6 +134,8 @@ export default function Dashboard() {
                         subtitle="directly connected"
                         color="#22c55e"
                         icon={<EthernetIcon />}
+                        onClick={() => handleOpenLiveModal('wired')}
+                        hoverColor="rgba(34, 197, 94, 0.5)"
                     />
                 </Grid>
                 <Grid item xs={12} sm={6} md={3}>
@@ -132,6 +145,8 @@ export default function Dashboard() {
                         subtitle="connected over WiFi"
                         color="#06b6d4"
                         icon={<WifiIcon />}
+                        onClick={() => handleOpenLiveModal('wireless')}
+                        hoverColor="rgba(6, 182, 212, 0.5)"
                     />
                 </Grid>
                 <Grid item xs={12} sm={6} md={3}>
@@ -386,6 +401,12 @@ export default function Dashboard() {
                     </Card>
                 </Grid>
             </Grid>
+
+            <LiveDevicesModal
+                open={liveModalOpen}
+                onClose={() => setLiveModalOpen(false)}
+                defaultTab={liveModalTab}
+            />
         </Box>
     );
 }

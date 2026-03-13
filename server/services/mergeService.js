@@ -175,7 +175,21 @@ async function mergeOnlineDevices() {
         console.log('mergeService: ping history fetch error:', err.message);
     }
 
-    return Array.from(merged.values());
+    // ── Determine is_registered ──────────────────────────────────────
+    const registeredDevices = db.prepare('SELECT ip_address, mac_address FROM devices').all();
+    const registeredIps = new Set(registeredDevices.map(d => d.ip_address).filter(Boolean));
+    const registeredMacs = new Set(registeredDevices.map(d => d.mac_address?.toLowerCase()).filter(Boolean));
+
+    const finalMerged = Array.from(merged.values()).map(device => {
+        const isIpRegistered = device.ip && registeredIps.has(device.ip);
+        const isMacRegistered = device.mac && registeredMacs.has(device.mac.toLowerCase());
+        return {
+            ...device,
+            is_registered: isIpRegistered || isMacRegistered
+        };
+    });
+
+    return finalMerged;
 }
 
 /**
