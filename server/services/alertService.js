@@ -102,16 +102,27 @@ async function createAlert({ device_id, alert_type, message, severity, fastify }
     if (fastify && fastify.io) {
         fastify.io.emit('alert:new', { alert: alertObj });
 
-        const unreadCount = getUnreadCount();
-        fastify.io.emit('alert:count', { unread_count: unreadCount });
+        fastify.io.emit('alert:count', getUnreadCount());
     }
 
     return alertObj;
 }
 
 function getUnreadCount() {
-    const result = db.prepare('SELECT count(*) as count FROM alerts WHERE is_read = 0').get();
-    return result.count;
+    const result = db.prepare(`
+        SELECT 
+            COUNT(*) as unread_count,
+            SUM(CASE WHEN severity = 'critical' THEN 1 ELSE 0 END) as critical_count,
+            SUM(CASE WHEN severity = 'warning' THEN 1 ELSE 0 END) as warning_count
+        FROM alerts 
+        WHERE is_read = 0
+    `).get();
+
+    return {
+        unread_count: result.unread_count || 0,
+        critical_count: result.critical_count || 0,
+        warning_count: result.warning_count || 0
+    };
 }
 
 function markAsRead(alert_id) {

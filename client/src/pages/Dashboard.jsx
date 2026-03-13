@@ -4,8 +4,10 @@ import { useQuery } from '@tanstack/react-query';
 import axios from 'axios';
 import StatCard from '../components/StatCard';
 import {
-    Computer, Cancel, Warning, Error as ErrorIcon,
-    Wifi as WifiIcon, SettingsEthernet as EthernetIcon, Devices as DevicesIcon
+    Computer, Warning,
+    Wifi as WifiIcon, SettingsEthernet as EthernetIcon, Devices as DevicesIcon,
+    Public as PublicIcon, ShieldOutlined as ShieldIcon, ReportProblemOutlined as ReportProblemIcon,
+    NotificationsOutlined as NotificationsIcon
 } from '@mui/icons-material';
 import { PieChart, Pie, Cell, Tooltip as RechartsTooltip, ResponsiveContainer } from 'recharts';
 
@@ -46,12 +48,16 @@ export default function Dashboard() {
         refetchInterval: 10000
     });
 
+    const { data: wanData } = useQuery({
+        queryKey: ['unifi', 'wan'],
+        queryFn: () => axios.get('/api/v1/unifi/wan').then(res => res.data),
+        refetchInterval: 30000
+    });
+
     const devices = devicesData?.devices || [];
     const onlineDevices = onlineData?.devices || [];
     const segments = segmentsData?.segments || [];
     const recentAlerts = alertsData?.alerts?.slice(0, 10) || [];
-    const unreadCount = unreadAlerts?.unread_count || 0;
-
     const totalTracked = devices.length;
     const offlineTracked = devices.filter(d => d.status === 'down').length;
 
@@ -60,8 +66,24 @@ export default function Dashboard() {
     const wirelessCount = counts?.wireless || 0;
 
     const criticalDevices = devices.filter(d => d.is_critical === 1);
+    const criticalTotal = criticalDevices.length;
     const criticalOnlineIPs = new Set(onlineDevices.filter(d => d.is_critical).map(d => d.ip));
-    const criticalOffline = criticalDevices.filter(d => !criticalOnlineIPs.has(d.ip_address) && d.status === 'down').length;
+
+    // Offline critical devices
+    const offlineCriticalList = criticalDevices.filter(d => !criticalOnlineIPs.has(d.ip_address) && d.status === 'down');
+    const criticalOffline = offlineCriticalList.length;
+
+    // Alert breakdown
+    const unreadCount = unreadAlerts?.unread_count || 0;
+    const criticalAlerts = unreadAlerts?.critical_count || 0;
+    const warningAlerts = unreadAlerts?.warning_count || 0;
+
+    // WAN Stats
+    const wanStats = wanData?.stats;
+    const isWanOnline = wanStats?.status === 'online';
+    const wanIp = wanStats?.wan_ip || 'No IP';
+    const txMbps = wanStats?.['tx_bytes-r'] ? (wanStats['tx_bytes-r'] * 8 / 1000000).toFixed(1) : '0';
+    const rxMbps = wanStats?.['rx_bytes-r'] ? (wanStats['rx_bytes-r'] * 8 / 1000000).toFixed(1) : '0';
 
     const pieData = [
         { name: 'Wired', value: wiredCount, color: '#22c55e' },
@@ -81,17 +103,18 @@ export default function Dashboard() {
         <Box>
             <Typography variant="h4" gutterBottom fontWeight="bold">Dashboard</Typography>
 
-            {/* ── Online device split: Total / Wired / WiFi ── */}
+            {/* ── ROW 1: Connectivity Summary (4 cards) ── */}
             <Grid container spacing={3} sx={{ mb: 1 }}>
-                <Grid item xs={12} sm={4}>
+                <Grid item xs={12} sm={6} md={3}>
                     <StatCard
                         title="Total Online"
                         value={totalOnline}
+                        subtitle="across all segments"
                         color="#3b82f6"
                         icon={<DevicesIcon />}
                     />
                 </Grid>
-                <Grid item xs={12} sm={4}>
+                <Grid item xs={12} sm={6} md={3}>
                     <StatCard
                         title="Wired (LAN)"
                         value={wiredCount}
@@ -100,7 +123,7 @@ export default function Dashboard() {
                         icon={<EthernetIcon />}
                     />
                 </Grid>
-                <Grid item xs={12} sm={4}>
+                <Grid item xs={12} sm={6} md={3}>
                     <StatCard
                         title="Wireless (WiFi)"
                         value={wirelessCount}
@@ -109,46 +132,78 @@ export default function Dashboard() {
                         icon={<WifiIcon />}
                     />
                 </Grid>
+                <Grid item xs={12} sm={6} md={3}>
+                    <StatCard
+                        title="WAN Status"
+                        value={
+                            wanStats ? (
+                                <Chip label={isWanOnline ? "Online" : "Offline"} color={isWanOnline ? "success" : "error"} size="small" />
+                            ) : (
+                                <Typography variant="h6" color="text.secondary">Not configured</Typography>
+                            )
+                        }
+                        subtitle={wanStats ? (
+                            <Box>
+                                <Typography variant="caption" display="block">{wanIp}</Typography>
+                                <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+                                    ↑ {txMbps} Mbps  ↓ {rxMbps} Mbps
+                                </Typography>
+                            </Box>
+                        ) : null}
+                        color={wanStats ? (isWanOnline ? "#22c55e" : "#ef4444") : "#9ca3af"}
+                        icon={<PublicIcon />}
+                    />
+                </Grid>
             </Grid>
 
             {/* Inline equation */}
             <Typography variant="body2" color="text.secondary" sx={{ mb: 3, pl: 1 }}>
-                Total Online = Wired <strong>{wiredCount}</strong> + WiFi <strong>{wirelessCount}</strong>
+                Total Online ({totalOnline}) = Wired <strong>{wiredCount}</strong> + WiFi <strong>{wirelessCount}</strong>
             </Typography>
 
-            {/* ── Secondary stat row ── */}
+            {/* ── ROW 2: Health & Alerts (3 cards) ── */}
             <Grid container spacing={3} sx={{ mb: 4 }}>
-                <Grid item xs={12} sm={6} md={3}>
+                <Grid item xs={12} sm={6} md={4}>
                     <StatCard
-                        title="Tracked Devices"
-                        value={totalTracked}
-                        color="#8b5cf6"
-                        icon={<Computer />}
+                        title="Critical Devices"
+                        value={criticalTotal}
+                        subtitle={
+                            criticalTotal === 0 ? "No critical devices" :
+                                (criticalOffline === 0 ?
+                                    <span style={{ color: '#22c55e' }}>All online</span> :
+                                    <span style={{ color: '#ef4444' }}>{criticalOffline} of {criticalTotal} offline</span>
+                                )
+                        }
+                        color="#f59e0b"
+                        icon={<ShieldIcon />}
                     />
                 </Grid>
-                <Grid item xs={12} sm={6} md={3}>
+                <Grid item xs={12} sm={6} md={4}>
                     <StatCard
-                        title="Tracked Offline"
-                        value={offlineTracked}
-                        color="#ef4444"
-                        icon={<Cancel />}
-                    />
-                </Grid>
-                <Grid item xs={12} sm={6} md={3}>
-                    <StatCard
-                        title="Critical Offline"
+                        title="Critical Devices Offline"
                         value={criticalOffline}
+                        subtitle={
+                            criticalOffline === 0 ?
+                                <span style={{ color: '#22c55e' }}>All critical devices online</span> :
+                                offlineCriticalList.slice(0, 2).map(d => d.hostname || d.ip_address).join(', ') +
+                                (criticalOffline > 2 ? ` + ${criticalOffline - 2} more` : '')
+                        }
                         color="#ef4444"
                         urgent={criticalOffline > 0}
-                        icon={<Warning />}
+                        icon={<ReportProblemIcon />}
                     />
                 </Grid>
-                <Grid item xs={12} sm={6} md={3}>
+                <Grid item xs={12} sm={6} md={4}>
                     <StatCard
                         title="Active Alerts"
                         value={unreadCount}
-                        color="#f59e0b"
-                        icon={<ErrorIcon />}
+                        subtitle={
+                            unreadCount === 0 ?
+                                <span style={{ color: '#22c55e' }}>No active alerts</span> :
+                                `${criticalAlerts} critical · ${warningAlerts} warnings`
+                        }
+                        color={criticalAlerts > 0 ? "#ef4444" : (warningAlerts > 0 ? "#f59e0b" : "#22c55e")}
+                        icon={<NotificationsIcon />}
                     />
                 </Grid>
             </Grid>

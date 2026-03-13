@@ -29,7 +29,7 @@ module.exports = async function (fastify, opts) {
 
         // emit updated count
         if (fastify.io) {
-            fastify.io.emit('alert:count', { unread_count: alertService.getUnreadCount() });
+            fastify.io.emit('alert:count', alertService.getUnreadCount());
         }
 
         reply.send({ success: true });
@@ -39,13 +39,13 @@ module.exports = async function (fastify, opts) {
         db.prepare('UPDATE alerts SET is_read = 1 WHERE is_read = 0').run();
 
         if (fastify.io) {
-            fastify.io.emit('alert:count', { unread_count: 0 });
+            fastify.io.emit('alert:count', { unread_count: 0, critical_count: 0, warning_count: 0 });
         }
 
         reply.send({ success: true });
     });
 
     fastify.get('/count', async (request, reply) => {
-        reply.send({ unread_count: alertService.getUnreadCount() });
+        reply.send(alertService.getUnreadCount());
     });
 };
