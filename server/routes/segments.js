@@ -1,22 +1,37 @@
 const db = require('../db/database');
 const { scanSegment } = require('../services/scanService');
+const mergeService = require('../services/mergeService');
+const { Netmask } = require('netmask');
 
 module.exports = async function (fastify, opts) {
     fastify.addHook('preValidation', fastify.authenticate);
 
     fastify.get('/', async (request, reply) => {
         const segments = db.prepare(`
-      SELECT s.*,
-             (SELECT count(*) FROM devices d WHERE d.segment_id = s.id) as device_count,
-             (SELECT count(*) FROM devices d 
-              WHERE d.segment_id = s.id 
-              AND (SELECT status FROM ping_history ph WHERE ph.device_id = d.id ORDER BY timestamp DESC LIMIT 1) = 'up'
-             ) as devices_up,
-             (SELECT scanned_at FROM scan_results sr WHERE sr.segment_id = s.id ORDER BY scanned_at DESC LIMIT 1) as last_scan
-      FROM segments s
-    `).all();
+            SELECT s.*,
+                   (SELECT count(*) FROM devices d WHERE d.segment_id = s.id) as registered_count,
+                   (SELECT scanned_at FROM scan_results sr WHERE sr.segment_id = s.id ORDER BY scanned_at DESC LIMIT 1) as last_scan_at,
+                   (SELECT hosts_found FROM scan_results sr WHERE sr.segment_id = s.id ORDER BY scanned_at DESC LIMIT 1) as scan_total,
+                   (SELECT hosts_up FROM scan_results sr WHERE sr.segment_id = s.id ORDER BY scanned_at DESC LIMIT 1) as scan_up
+            FROM segments s
+        `).all();
 
-        reply.send({ segments });
+        // Add online_count from merged online list
+        const onlineDevices = await mergeService.mergeOnlineDevices();
+
+        const enrichedSegments = segments.map(seg => {
+            const block = new Netmask(seg.cidr);
+            const online_count = onlineDevices.filter(d => d.ip && block.contains(d.ip)).length;
+
+            return {
+                ...seg,
+                scan_total: seg.scan_total || 0,
+                scan_up: seg.scan_up || 0,
+                online_count
+            };
+        });
+
+        reply.send({ segments: enrichedSegments });
     });
 
     fastify.post('/', async (request, reply) => {

@@ -1,5 +1,6 @@
 import React from 'react';
-import { Box, Typography, Grid, Card, Chip, LinearProgress } from '@mui/material';
+import { Link as RouterLink } from 'react-router-dom';
+import { Box, Typography, Grid, Card, Chip, LinearProgress, Link } from '@mui/material';
 import { useQuery } from '@tanstack/react-query';
 import axios from 'axios';
 import StatCard from '../components/StatCard';
@@ -79,11 +80,12 @@ export default function Dashboard() {
     const warningAlerts = unreadAlerts?.warning_count || 0;
 
     // WAN Stats
-    const wanStats = wanData?.stats;
-    const isWanOnline = wanStats?.status === 'online';
-    const wanIp = wanStats?.wan_ip || 'No IP';
-    const txMbps = wanStats?.['tx_bytes-r'] ? (wanStats['tx_bytes-r'] * 8 / 1000000).toFixed(1) : '0';
-    const rxMbps = wanStats?.['rx_bytes-r'] ? (wanStats['rx_bytes-r'] * 8 / 1000000).toFixed(1) : '0';
+    const wanStats = wanData?.stats || { status: 'unknown', wan_ip: null, tx_mbps: '0', rx_mbps: '0' };
+    const isWanOnline = wanStats.status === 'up';
+    const isWanUnknown = wanStats.status === 'unknown';
+    const wanIp = wanStats.wan_ip || 'IP unavailable';
+    const txMbps = wanStats.tx_mbps;
+    const rxMbps = wanStats.rx_mbps;
 
     const pieData = [
         { name: 'Wired', value: wiredCount, color: '#22c55e' },
@@ -136,21 +138,27 @@ export default function Dashboard() {
                     <StatCard
                         title="WAN Status"
                         value={
-                            wanStats ? (
-                                <Chip label={isWanOnline ? "Online" : "Offline"} color={isWanOnline ? "success" : "error"} size="small" />
+                            isWanUnknown ? (
+                                <Chip label="Unknown" color="default" size="small" />
                             ) : (
-                                <Typography variant="h6" color="text.secondary">Not configured</Typography>
+                                <Chip label={isWanOnline ? "Online" : "Offline"} color={isWanOnline ? "success" : "error"} size="small" />
                             )
                         }
-                        subtitle={wanStats ? (
-                            <Box>
-                                <Typography variant="caption" display="block">{wanIp}</Typography>
-                                <Typography variant="caption" sx={{ color: 'text.secondary' }}>
-                                    ↑ {txMbps} Mbps  ↓ {rxMbps} Mbps
-                                </Typography>
-                            </Box>
-                        ) : null}
-                        color={wanStats ? (isWanOnline ? "#22c55e" : "#ef4444") : "#9ca3af"}
+                        subtitle={
+                            isWanUnknown ? (
+                                <Typography variant="caption" color="text.secondary">Could not read WAN data</Typography>
+                            ) : (
+                                <Box>
+                                    <Typography variant="caption" display="block">{wanIp}</Typography>
+                                    {isWanOnline && (
+                                        <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+                                            ↑ {txMbps} Mbps  ↓ {rxMbps} Mbps
+                                        </Typography>
+                                    )}
+                                </Box>
+                            )
+                        }
+                        color={isWanUnknown ? "#9ca3af" : (isWanOnline ? "#22c55e" : "#ef4444")}
                         icon={<PublicIcon />}
                     />
                 </Grid>
@@ -168,7 +176,7 @@ export default function Dashboard() {
                         title="Critical Devices"
                         value={criticalTotal}
                         subtitle={
-                            criticalTotal === 0 ? "No critical devices" :
+                            criticalTotal === 0 ? <span style={{ color: '#9ca3af' }}>None configured</span> :
                                 (criticalOffline === 0 ?
                                     <span style={{ color: '#22c55e' }}>All online</span> :
                                     <span style={{ color: '#ef4444' }}>{criticalOffline} of {criticalTotal} offline</span>
@@ -181,12 +189,16 @@ export default function Dashboard() {
                 <Grid item xs={12} sm={6} md={4}>
                     <StatCard
                         title="Critical Devices Offline"
-                        value={criticalOffline}
+                        value={criticalTotal === 0 ? "-" : criticalOffline}
                         subtitle={
-                            criticalOffline === 0 ?
-                                <span style={{ color: '#22c55e' }}>All critical devices online</span> :
-                                offlineCriticalList.slice(0, 2).map(d => d.hostname || d.ip_address).join(', ') +
-                                (criticalOffline > 2 ? ` + ${criticalOffline - 2} more` : '')
+                            criticalTotal === 0 ? <span style={{ color: '#9ca3af' }}>No critical devices set</span> :
+                                (criticalOffline === 0 ?
+                                    <span style={{ color: '#22c55e' }}>All critical devices online</span> :
+                                    <span style={{ color: '#ef4444' }}>
+                                        {offlineCriticalList.slice(0, 2).map(d => d.hostname || d.ip_address).join(', ') +
+                                            (criticalOffline > 2 ? ` + ${criticalOffline - 2} more` : '')}
+                                    </span>
+                                )
                         }
                         color="#ef4444"
                         urgent={criticalOffline > 0}
@@ -244,24 +256,41 @@ export default function Dashboard() {
                                 <Typography variant="h6" gutterBottom>Network Segments Health</Typography>
                                 {segments.length === 0 && <Typography color="text.secondary">No segments configured.</Typography>}
                                 {segments.map(seg => {
-                                    const percent = seg.device_count > 0 ? (seg.devices_up / seg.device_count) * 100 : 0;
+                                    const totalDenom = seg.scan_total > 0 ? seg.scan_total : seg.registered_count;
+                                    const percent = totalDenom > 0 ? (seg.online_count / totalDenom) * 100 : 0;
+
+                                    let subText;
+                                    if (seg.scan_total > 0 && seg.last_scan_at) {
+                                        // "last scan: an hour ago" style logic, simplied to local string
+                                        subText = `last scan: ${new Date(seg.last_scan_at).toLocaleString()}`;
+                                    } else {
+                                        subText = <React.Fragment>Run a <Link component={RouterLink} to="/segments" sx={{ color: 'primary.main', textDecoration: 'none', '&:hover': { textDecoration: 'underline' } }}>scan</Link> for full visibility</React.Fragment>;
+                                    }
+
                                     return (
-                                        <Box key={seg.id} sx={{ mb: 2 }}>
+                                        <Box key={seg.id} sx={{ mb: 3 }}>
                                             <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.5 }}>
                                                 <Typography variant="body2" sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                                                     <Box sx={{ width: 12, height: 12, borderRadius: '50%', bgcolor: seg.color || '#888' }} />
-                                                    {seg.name}
+                                                    {seg.name} <Typography component="span" variant="caption" color="text.secondary">({seg.online_count} online)</Typography>
                                                 </Typography>
                                                 <Typography variant="body2" color="text.secondary">
-                                                    {seg.devices_up} / {seg.device_count} UP
+                                                    {totalDenom === 0 ? "No scan data" : (
+                                                        seg.scan_total > 0
+                                                            ? `${seg.online_count} / ${seg.scan_total} UP`
+                                                            : `${seg.online_count} / ${seg.registered_count} registered UP`
+                                                    )}
                                                 </Typography>
                                             </Box>
                                             <LinearProgress
                                                 variant="determinate"
                                                 value={percent}
                                                 color={percent === 100 ? "success" : percent > 50 ? "warning" : "error"}
-                                                sx={{ height: 8, borderRadius: 4 }}
+                                                sx={{ height: 8, borderRadius: 4, mb: 0.5, opacity: totalDenom === 0 ? 0.2 : 1 }}
                                             />
+                                            <Typography variant="caption" color="text.secondary">
+                                                {subText}
+                                            </Typography>
                                         </Box>
                                     );
                                 })}

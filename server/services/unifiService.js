@@ -172,10 +172,28 @@ async function getHourlySiteReport(start, end) {
 }
 
 async function getWanStats() {
-    const data = await getSiteHealth();
-    if (!data || !data.data) return null;
-    const wan = data.data.find(s => s.subsystem === 'wan');
-    return wan || null;
+    // Note: getSiteHealth() returns { data: [ { subsystem: 'wan', ... }, ... ] }
+    // which means the actual array is inside response.data.data
+    const response = await getSiteHealth();
+    if (!response || !response.data) {
+        return { status: 'unknown', wan_ip: null, tx_mbps: '0.00', rx_mbps: '0.00' };
+    }
+
+    const health = Array.isArray(response.data) ? response.data : response.data.data;
+    if (!health || !Array.isArray(health)) {
+        return { status: 'unknown', wan_ip: null, tx_mbps: '0.00', rx_mbps: '0.00' };
+    }
+
+    const wan = health.find(s => s.subsystem === 'wan');
+
+    return {
+        status: wan?.status === 'ok' ? 'up' : 'down',
+        wan_ip: wan?.wan_ip || wan?.gw_addr || null,
+        tx_mbps: wan ? ((wan.tx_bytes_r || 0) * 8 / 1e6).toFixed(2) : '0.00',
+        rx_mbps: wan ? ((wan.rx_bytes_r || 0) * 8 / 1e6).toFixed(2) : '0.00',
+        latency: wan?.latency || null,
+        uptime: wan?.uptime || null
+    };
 }
 
 module.exports = {
