@@ -153,22 +153,38 @@ export default function Dashboard() {
                     <StatCard
                         title="WAN Status"
                         value={
-                            isWanUnknown ? (
-                                <Chip label="Unknown" color="default" size="small" />
+                            isWanOnline ? (
+                                <Chip label="Online" color="success" size="small" />
+                            ) : wanStats.status === 'down' ? (
+                                <Chip label="Offline" color="error" size="small" />
                             ) : (
-                                <Chip label={isWanOnline ? "Online" : "Offline"} color={isWanOnline ? "success" : "error"} size="small" />
+                                <Chip label="Unknown" color="default" size="small" />
                             )
                         }
                         subtitle={
                             isWanUnknown ? (
-                                <Typography variant="caption" color="text.secondary">Could not read WAN data</Typography>
+                                <Box>
+                                    <Typography variant="caption" color="text.secondary" display="block">
+                                        UniFi connected but WAN data unreadable
+                                    </Typography>
+                                    <Link component="button" variant="caption" onClick={() => console.log('WAN Debug Data:', wanStats)} sx={{ mt: 0.5 }}>
+                                        Check console logs
+                                    </Link>
+                                </Box>
                             ) : (
                                 <Box>
                                     <Typography variant="caption" display="block">{wanIp}</Typography>
                                     {isWanOnline && (
-                                        <Typography variant="caption" sx={{ color: 'text.secondary' }}>
-                                            ↑ {txMbps} Mbps  ↓ {rxMbps} Mbps
-                                        </Typography>
+                                        <>
+                                            <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block' }}>
+                                                ↑ {txMbps} Mbps  ↓ {rxMbps} Mbps
+                                            </Typography>
+                                            {wanStats.latency && (
+                                                <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+                                                    Latency: {wanStats.latency}ms
+                                                </Typography>
+                                            )}
+                                        </>
                                     )}
                                 </Box>
                             )

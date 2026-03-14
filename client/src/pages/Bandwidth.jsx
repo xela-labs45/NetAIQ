@@ -54,13 +54,22 @@ export default function Bandwidth() {
   const getTopClients = () => {
     if (!clientsUsageData?.data) return [];
     return [...clientsUsageData.data]
-      .filter(c => c.tx_bytes > 0 || c.rx_bytes > 0)
       .map(c => {
-        let name = c.hostname || c.name || c.ip || c.mac || 'Unknown';
+        let name = c.name || c.mac || 'Unknown';
+        let originalName = name;
+
+        // Label resolution logic
+        if (name.match(/^([0-9a-f]{2}[:-]){5}([0-9a-f]{2})$/i)) {
+          // It's a MAC address, shorten it
+          name = `..:${name.slice(-8)}`;
+        }
+
         let truncatedName = name.length > 18 ? name.slice(0, 16) + '…' : name;
+
         return {
-          originalName: name,
+          originalName: originalName,
           name: truncatedName,
+          isMac: name.startsWith('..:'),
           mac: c.mac || 'N/A',
           ip: c.ip || 'N/A',
           totalRate: c.tx_bytes + c.rx_bytes,
@@ -69,7 +78,7 @@ export default function Bandwidth() {
         };
       })
       .sort((a, b) => b.totalRate - a.totalRate)
-      .slice(0, 10);
+      .slice(0, 15);
   };
 
   const CustomTooltip = ({ active, payload, label }) => {
@@ -125,25 +134,42 @@ export default function Bandwidth() {
             {wanLoading ? <CircularProgress /> : wan ? (
               <Box sx={{ zIndex: 1 }}>
                 <Typography variant="body2" color="text.secondary" gutterBottom>
-                  Status: <Typography component="span" color={wan.status === 'ok' ? 'success.main' : 'error.main'} fontWeight="bold" textTransform="uppercase">{wan.status}</Typography>
-                </Typography>
-                <Typography variant="body2" color="text.secondary" gutterBottom>
-                  IP Address: <Typography component="span" color="text.primary">{wan.wan_ip || 'Unknown'}</Typography>
-                </Typography>
-                <Typography variant="body2" color="text.secondary" gutterBottom>
-                  Latency: <Typography component="span" color="text.primary">{wan.latency} ms</Typography>
+                  Status: {
+                    wan.status === 'up' ? (
+                      <Chip label="ONLINE" color="success" size="small" sx={{ fontWeight: 'bold' }} />
+                    ) : wan.status === 'down' ? (
+                      <Chip label="OFFLINE" color="error" size="small" sx={{ fontWeight: 'bold' }} />
+                    ) : (
+                      <Chip label="UNKNOWN" color="default" size="small" sx={{ fontWeight: 'bold' }} />
+                    )
+                  }
                 </Typography>
 
-                <Box sx={{ mt: 3, display: 'flex', justifyContent: 'space-between' }}>
-                  <Box>
-                    <Typography variant="caption" color="primary">Current Download</Typography>
-                    <Typography variant="h5" fontWeight="bold">{formatBytes(wan.rx_bytes_r)}/s</Typography>
-                  </Box>
-                  <Box textAlign="right">
-                    <Typography variant="caption" color="secondary">Current Upload</Typography>
-                    <Typography variant="h5" fontWeight="bold">{formatBytes(wan.tx_bytes_r)}/s</Typography>
-                  </Box>
-                </Box>
+                {wan.status === 'unknown' ? (
+                  <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+                    Could not read WAN data from UniFi
+                  </Typography>
+                ) : (
+                  <>
+                    <Typography variant="body2" color="text.secondary" gutterBottom>
+                      IP Address: <Typography component="span" color="text.primary">{wan.wan_ip || 'Unknown'}</Typography>
+                    </Typography>
+                    <Typography variant="body2" color="text.secondary" gutterBottom>
+                      Latency: <Typography component="span" color="text.primary">{wan.latency ? `${wan.latency} ms` : '—'}</Typography>
+                    </Typography>
+
+                    <Box sx={{ mt: 3, display: 'flex', justifyContent: 'space-between' }}>
+                      <Box>
+                        <Typography variant="caption" color="primary">Current Download</Typography>
+                        <Typography variant="h5" fontWeight="bold">{formatBytes(wan.rx_mbps * 125000)}/s</Typography>
+                      </Box>
+                      <Box textAlign="right">
+                        <Typography variant="caption" color="secondary">Current Upload</Typography>
+                        <Typography variant="h5" fontWeight="bold">{formatBytes(wan.tx_mbps * 125000)}/s</Typography>
+                      </Box>
+                    </Box>
+                  </>
+                )}
               </Box>
             ) : (
               <Typography color="text.secondary">No WAN data available.</Typography>
@@ -154,39 +180,47 @@ export default function Bandwidth() {
         <Grid item xs={12} md={8}>
           <Card sx={{ p: 3, height: '100%', minHeight: 300 }}>
             <Typography variant="h6" gutterBottom>WAN Traffic — Last 24h</Typography>
-            <Box sx={{ height: 250 }}>
-              <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={formatHourlyData()} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
-                  <defs>
-                    <linearGradient id="colorRx" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.8} />
-                      <stop offset="95%" stopColor="#3b82f6" stopOpacity={0} />
-                    </linearGradient>
-                    <linearGradient id="colorTx" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#8b5cf6" stopOpacity={0.8} />
-                      <stop offset="95%" stopColor="#8b5cf6" stopOpacity={0} />
-                    </linearGradient>
-                  </defs>
-                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.1)" />
-                  <XAxis
-                    dataKey="time"
-                    tickFormatter={(tick) => format(new Date(tick), 'HH:mm')}
-                    stroke="#888"
-                  />
-                  <YAxis
-                    tickFormatter={(tick) => formatBytes(tick)}
-                    stroke="#888"
-                  />
-                  <RechartsTooltip
-                    labelFormatter={(label) => format(new Date(label), 'MMM dd, HH:mm')}
-                    formatter={(value) => formatBytes(value)}
-                    contentStyle={{ backgroundColor: '#111827', borderColor: '#3b82f6' }}
-                  />
-                  <Legend />
-                  <Area type="monotone" name="Download (RX)" dataKey="rx" stroke="#3b82f6" fillOpacity={1} fill="url(#colorRx)" />
-                  <Area type="monotone" name="Upload (TX)" dataKey="tx" stroke="#8b5cf6" fillOpacity={1} fill="url(#colorTx)" />
-                </AreaChart>
-              </ResponsiveContainer>
+            <Box sx={{ height: 250, display: 'flex', flexDirection: 'column' }}>
+              {formatHourlyData().length > 0 ? (
+                <ResponsiveContainer width="100%" height="100%">
+                  <AreaChart data={formatHourlyData()} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
+                    <defs>
+                      <linearGradient id="colorRx" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.8} />
+                        <stop offset="95%" stopColor="#3b82f6" stopOpacity={0} />
+                      </linearGradient>
+                      <linearGradient id="colorTx" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="#8b5cf6" stopOpacity={0.8} />
+                        <stop offset="95%" stopColor="#8b5cf6" stopOpacity={0} />
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.1)" />
+                    <XAxis
+                      dataKey="time"
+                      tickFormatter={(tick) => format(new Date(tick), 'HH:mm')}
+                      stroke="#888"
+                    />
+                    <YAxis
+                      tickFormatter={(tick) => formatBytes(tick)}
+                      stroke="#888"
+                    />
+                    <RechartsTooltip
+                      labelFormatter={(label) => format(new Date(label), 'MMM dd, HH:mm')}
+                      formatter={(value) => formatBytes(value)}
+                      contentStyle={{ backgroundColor: '#111827', borderColor: '#3b82f6' }}
+                    />
+                    <Legend />
+                    <Area type="monotone" name="Download (RX)" dataKey="rx" stroke="#3b82f6" fillOpacity={1} fill="url(#colorRx)" />
+                    <Area type="monotone" name="Upload (TX)" dataKey="tx" stroke="#8b5cf6" fillOpacity={1} fill="url(#colorTx)" />
+                  </AreaChart>
+                </ResponsiveContainer>
+              ) : (
+                <Box sx={{ flexGrow: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <Alert severity="info" sx={{ bgcolor: 'rgba(59, 130, 246, 0.05)', border: '1px solid rgba(59, 130, 246, 0.2)' }}>
+                    No WAN traffic data available. This may be a UniFi reporting configuration issue.
+                  </Alert>
+                </Box>
+              )}
             </Box>
           </Card>
         </Grid>
@@ -196,7 +230,18 @@ export default function Bandwidth() {
         <Grid item xs={12}>
           <Card sx={{ p: 3, minHeight: 400 }}>
             <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
-              <Typography variant="h6">Top Clients by Usage</Typography>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+                <Typography variant="h6">Top Clients by Usage</Typography>
+                {clientsUsageData?.source === 'realtime' && (
+                  <Chip
+                    label="Live data · historical report unavailable"
+                    size="small"
+                    color="warning"
+                    variant="outlined"
+                    sx={{ fontSize: '0.7rem' }}
+                  />
+                )}
+              </Box>
               <ToggleButtonGroup
                 color="primary"
                 value={timeRange}
@@ -214,7 +259,32 @@ export default function Bandwidth() {
                 <BarChart data={getTopClients()} layout="vertical" margin={{ top: 5, right: 30, left: 10, bottom: 5 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.1)" horizontal={false} />
                   <XAxis type="number" tickFormatter={(tick) => formatBytes(tick)} stroke="#888" />
-                  <YAxis type="category" dataKey="name" width={160} interval={0} tick={{ fontSize: 11 }} stroke="#888" />
+                  <YAxis
+                    type="category"
+                    dataKey="name"
+                    width={160}
+                    interval={0}
+                    tick={(props) => {
+                      const { x, y, payload } = props;
+                      const data = getTopClients().find(d => d.name === payload.value);
+                      return (
+                        <g transform={`translate(${x},${y})`}>
+                          <text
+                            x={-10}
+                            y={0}
+                            dy={4}
+                            textAnchor="end"
+                            fill={data?.isMac ? "#888" : "#ccc"}
+                            fontSize={11}
+                            fontStyle={data?.isMac ? "italic" : "normal"}
+                          >
+                            {payload.value}
+                          </text>
+                        </g>
+                      );
+                    }}
+                    stroke="#888"
+                  />
                   <RechartsTooltip content={<CustomTooltip />} />
                   <Legend />
                   <Bar dataKey="rx" name="Download (RX)" stackId="a" fill="#3b82f6" />
