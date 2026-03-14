@@ -11,7 +11,10 @@ import {
     SettingsEthernet as EthernetIcon,
     Wifi as WifiIcon,
     CheckCircleOutline as CheckCircleIcon,
-    HelpOutline as UnknownIcon
+    HelpOutline as UnknownIcon,
+    ArrowUpward as ArrowUpwardIcon,
+    ArrowDownward as ArrowDownwardIcon,
+    UnfoldMore as UnfoldMoreIcon
 } from '@mui/icons-material';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import axios from 'axios';
@@ -21,6 +24,8 @@ export default function LiveDevicesModal({ open, onClose, defaultTab = 'all' }) 
     const queryClient = useQueryClient();
     const socket = useSocket();
     const [tab, setTab] = useState(defaultTab);
+    const [sortBy, setSortBy] = useState('is_registered');
+    const [sortDir, setSortDir] = useState('asc');
 
     const [addDialogOpen, setAddDialogOpen] = useState(false);
     const [addFormData, setAddFormData] = useState({
@@ -59,6 +64,11 @@ export default function LiveDevicesModal({ open, onClose, defaultTab = 'all' }) 
         };
     }, [socket, open]);
 
+    useEffect(() => {
+        setSortBy('is_registered');
+        setSortDir('asc');
+    }, [tab]);
+
     const { data, isLoading, refetch, isFetching } = useQuery({
         queryKey: ['liveDevices', tab],
         queryFn: () => axios.get(`/api/v1/devices/online?connection=${tab}`).then(res => res.data),
@@ -85,17 +95,46 @@ export default function LiveDevicesModal({ open, onClose, defaultTab = 'all' }) 
 
     const devices = data?.devices || [];
 
-    // Sort: unregistered first, then alphabetical hostname
+    const handleSort = (column) => {
+        if (column === sortBy) {
+            setSortDir(sortDir === 'asc' ? 'desc' : 'asc');
+        } else {
+            setSortBy(column);
+            setSortDir('asc');
+        }
+    };
+
     const sortedDevices = useMemo(() => {
+        if (!devices) return [];
         return [...devices].sort((a, b) => {
-            if (a.is_registered === b.is_registered) {
-                const nameA = a.hostname || a.ip;
-                const nameB = b.hostname || b.ip;
-                return nameA.localeCompare(nameB);
+            let aVal = a[sortBy];
+            let bVal = b[sortBy];
+
+            // Handle nulls — always sort to bottom regardless of direction
+            if (aVal == null && bVal == null) return 0;
+            if (aVal == null) return 1;
+            if (bVal == null) return -1;
+
+            // Numeric columns
+            if (typeof aVal === 'number' && typeof bVal === 'number') {
+                return sortDir === 'asc' ? aVal - bVal : bVal - aVal;
             }
-            return a.is_registered ? 1 : -1;
+
+            // Boolean columns (is_registered, is_wired, is_critical)
+            if (typeof aVal === 'boolean') {
+                return sortDir === 'asc'
+                    ? (aVal === bVal ? 0 : aVal ? 1 : -1)
+                    : (aVal === bVal ? 0 : aVal ? -1 : 1);
+            }
+
+            // String columns — case insensitive
+            aVal = String(aVal).toLowerCase();
+            bVal = String(bVal).toLowerCase();
+            if (aVal < bVal) return sortDir === 'asc' ? -1 : 1;
+            if (aVal > bVal) return sortDir === 'asc' ? 1 : -1;
+            return 0;
         });
-    }, [devices]);
+    }, [devices, sortBy, sortDir]);
 
     const unregisteredCount = devices.filter(d => !d.is_registered).length;
 
@@ -174,15 +213,16 @@ export default function LiveDevicesModal({ open, onClose, defaultTab = 'all' }) 
                             <TableHead>
                                 <TableRow>
                                     <TableCell>Status</TableCell>
-                                    <TableCell>Hostname</TableCell>
-                                    <TableCell>IP Address</TableCell>
-                                    <TableCell>MAC</TableCell>
-                                    <TableCell>Source</TableCell>
-                                    <TableCell>Connection</TableCell>
-                                    {tab !== 'wired' && <TableCell>Signal</TableCell>}
-                                    <TableCell>Usage</TableCell>
-                                    <TableCell>Segment</TableCell>
-                                    <TableCell align="center">Registered</TableCell>
+                                    <SortableHeader column="hostname" label="Hostname" sortBy={sortBy} sortDir={sortDir} onSort={handleSort} />
+                                    <SortableHeader column="ip" label="IP Address" sortBy={sortBy} sortDir={sortDir} onSort={handleSort} />
+                                    <SortableHeader column="mac" label="MAC" sortBy={sortBy} sortDir={sortDir} onSort={handleSort} />
+                                    <SortableHeader column="source" label="Source" sortBy={sortBy} sortDir={sortDir} onSort={handleSort} />
+                                    <SortableHeader column="is_wired" label="Connection" sortBy={sortBy} sortDir={sortDir} onSort={handleSort} />
+                                    {tab !== 'wired' && <SortableHeader column="signal" label="Signal" sortBy={sortBy} sortDir={sortDir} onSort={handleSort} />}
+                                    <SortableHeader column="tx_bytes" label="Upload" align="right" sortBy={sortBy} sortDir={sortDir} onSort={handleSort} />
+                                    <SortableHeader column="rx_bytes" label="Download" align="right" sortBy={sortBy} sortDir={sortDir} onSort={handleSort} />
+                                    <SortableHeader column="segment_name" label="Segment" sortBy={sortBy} sortDir={sortDir} onSort={handleSort} />
+                                    <SortableHeader column="is_registered" label="Registered" align="center" sortBy={sortBy} sortDir={sortDir} onSort={handleSort} />
                                 </TableRow>
                             </TableHead>
                             <TableBody>
@@ -211,12 +251,11 @@ export default function LiveDevicesModal({ open, onClose, defaultTab = 'all' }) 
                                                 {d.is_wired === false && d.signal ? `${d.signal} dBm` : '—'}
                                             </TableCell>
                                         )}
-                                        <TableCell>
-                                            {d.source === 'unifi' ? (
-                                                <Typography variant="caption" sx={{ whiteSpace: 'nowrap' }}>
-                                                    ↑ {formatBytes(d.tx_bytes)}<br />↓ {formatBytes(d.rx_bytes)}
-                                                </Typography>
-                                            ) : '—'}
+                                        <TableCell align="right">
+                                            {d.source === 'unifi' ? formatBytes(d.tx_bytes) : '—'}
+                                        </TableCell>
+                                        <TableCell align="right">
+                                            {d.source === 'unifi' ? formatBytes(d.rx_bytes) : '—'}
                                         </TableCell>
                                         <TableCell>
                                             {d.segment_name ? <Chip size="small" label={d.segment_name} variant="outlined" /> : '—'}
@@ -315,5 +354,39 @@ export default function LiveDevicesModal({ open, onClose, defaultTab = 'all' }) 
                 </DialogActions>
             </Dialog>
         </>
+    );
+}
+
+function SortableHeader({ column, label, sortBy, sortDir, onSort, align = 'left' }) {
+    const active = sortBy === column;
+    return (
+        <TableCell
+            align={align}
+            onClick={() => onSort(column)}
+            sx={{
+                cursor: 'pointer',
+                userSelect: 'none',
+                whiteSpace: 'nowrap',
+                color: active ? 'primary.main' : 'text.secondary',
+                '&:hover': { color: 'text.primary' },
+                transition: 'color 0.15s'
+            }}
+        >
+            <Box sx={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 0.5,
+                justifyContent: align === 'right' ? 'flex-end' : align === 'center' ? 'center' : 'flex-start'
+            }}>
+                {label}
+                {active ? (
+                    sortDir === 'asc'
+                        ? <ArrowUpwardIcon sx={{ fontSize: 14 }} />
+                        : <ArrowDownwardIcon sx={{ fontSize: 14 }} />
+                ) : (
+                    <UnfoldMoreIcon sx={{ fontSize: 14, opacity: 0.3 }} />
+                )}
+            </Box>
+        </TableCell>
     );
 }
