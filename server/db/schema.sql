@@ -27,6 +27,9 @@ CREATE TABLE IF NOT EXISTS devices (
   created_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE INDEX IF NOT EXISTS idx_devices_ip ON devices(ip_address);
+CREATE INDEX IF NOT EXISTS idx_devices_mac ON devices(mac_address);
+
 CREATE TABLE IF NOT EXISTS ping_history (
   id INTEGER PRIMARY KEY,
   device_id INTEGER REFERENCES devices(id) ON DELETE CASCADE,
@@ -50,6 +53,9 @@ CREATE TABLE IF NOT EXISTS alerts (
   email_sent INTEGER DEFAULT 0,
   created_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
+
+CREATE INDEX IF NOT EXISTS idx_alerts_device_id ON alerts(device_id);
+CREATE INDEX IF NOT EXISTS idx_alerts_is_read ON alerts(is_read);
 
 CREATE TABLE IF NOT EXISTS scan_results (
   id INTEGER PRIMARY KEY,

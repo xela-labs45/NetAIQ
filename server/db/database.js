@@ -29,6 +29,15 @@ const initDb = () => {
 const tableCheck = db.prepare("SELECT count(*) as count FROM sqlite_master WHERE type='table' AND name='users'").get();
 if (tableCheck.count === 0) {
     initDb();
+} else {
+    // Ensure missing indexes are created on startup
+    const schemaPath = path.join(__dirname, 'schema.sql');
+    const schema = fs.readFileSync(schemaPath, 'utf8');
+    // Extract only CREATE INDEX statements and run them
+    const indexStmts = schema.match(/CREATE INDEX IF NOT EXISTS.*?;/gs);
+    if (indexStmts) {
+        indexStmts.forEach(stmt => db.exec(stmt));
+    }
 }
 
 module.exports = db;
