@@ -4,16 +4,23 @@ import { useQuery } from '@tanstack/react-query';
 import axios from 'axios';
 import { AreaChart, Area, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer, Legend } from 'recharts';
 import { format } from 'date-fns';
-import { Router as RouterIcon, Download as DownloadIcon, Upload as UploadIcon, SignalWifiStatusbarConnectedNoInternet4 as OfflineIcon } from '@mui/icons-material';
+import {
+  WifiTetheringOutlined as APTetheringIcon,
+  WifiOutlined as WifiUserIcon,
+  CheckCircleOutlined as CheckCircleIcon,
+  WarningAmber as WarningIcon,
+  Download as DownloadIcon,
+  Upload as UploadIcon
+} from '@mui/icons-material';
 import { Skeleton, Chip } from '@mui/material';
 
 export default function Bandwidth() {
 
   const [timeRange, setTimeRange] = useState('today'); // 'today', '24h', '7d'
 
-  const { data: wanData, isLoading: wanLoading, isError: wanError } = useQuery({
-    queryKey: ['unifi', 'wan'],
-    queryFn: () => axios.get('/api/v1/unifi/wan').then(res => res.data),
+  const { data: wlanData, isLoading: wlanLoading, isError: wlanError } = useQuery({
+    queryKey: ['unifi', 'wlan'],
+    queryFn: () => axios.get('/api/v1/unifi/wlan').then(res => res.data),
     refetchInterval: 60000,
     retry: 1
   });
@@ -29,11 +36,15 @@ export default function Bandwidth() {
   });
 
   const { data: hourlyChart, isLoading: hourlyLoading, isError: hourlyError } = useQuery({
-    queryKey: ['unifi', 'hourly'],
+    queryKey: ['unifi', 'hourly-wifi'],
     queryFn: () => {
       const end = Date.now();
       const start = end - (24 * 60 * 60 * 1000); // 24 hours ago
-      return axios.post('/api/v1/unifi/report/hourly-site', { start, end }).then(res => res.data);
+      return axios.post('/api/v1/unifi/report/hourly-site', {
+        start,
+        end,
+        attrs: ["wlan-tx_bytes", "wlan-rx_bytes", "time"]
+      }).then(res => res.data);
     },
     refetchInterval: 300000, // 5m
     retry: 1
@@ -118,19 +129,19 @@ export default function Bandwidth() {
     const rawData = hourlyChart?.data;
     if (!Array.isArray(rawData)) return [];
     return rawData.map(d => ({
-      time: d.time || Date.now(),
-      tx: d['wan-tx_bytes'] || d.tx_bytes || 0,
-      rx: d['wan-rx_bytes'] || d.rx_bytes || 0
+      time: d.time || d.datetime || Date.now(),
+      tx: d['wlan-tx_bytes'] || d.tx_bytes || 0,
+      rx: d['wlan-rx_bytes'] || d.rx_bytes || 0
     }));
   };
 
-  const wan = wanData?.stats;
+  const wlan = wlanData;
 
-  if (wanLoading || clientsLoading || hourlyLoading) {
+  if (wlanLoading || clientsLoading || hourlyLoading) {
     return <BandwidthSkeleton />;
   }
 
-  if (wanError || clientsError || hourlyError) {
+  if (wlanError || clientsError || hourlyError) {
     return (
       <Box sx={{ p: 3 }}>
         <Typography variant="h4" fontWeight="bold" gutterBottom>Bandwidth Monitoring</Typography>
@@ -145,75 +156,82 @@ export default function Bandwidth() {
     <Box>
       <Typography variant="h4" fontWeight="bold" gutterBottom>Bandwidth Monitoring</Typography>
 
-      {/* WAN Summary */}
+      {/* WiFi Summary */}
       <Grid container spacing={3} sx={{ mb: 4 }}>
         <Grid item xs={12} md={4}>
           <Card sx={{ p: 3, display: 'flex', flexDirection: 'column', height: '100%', position: 'relative', overflow: 'hidden' }}>
             <Box sx={{ position: 'absolute', right: -20, bottom: -20, opacity: 0.1 }}>
-              <RouterIcon sx={{ fontSize: 180 }} />
+              <APTetheringIcon sx={{ fontSize: 180 }} />
             </Box>
-            <Typography variant="h6" gutterBottom>WAN Interface</Typography>
-            {wanLoading ? <CircularProgress /> : wan ? (
+            <Typography variant="h6" gutterBottom>WiFi Overview</Typography>
+            {wlanLoading ? <CircularProgress /> : wlan ? (
               <Box sx={{ zIndex: 1 }}>
-                <Typography variant="body2" color="text.secondary" gutterBottom>
-                  Status: {
-                    wan.status === 'up' ? (
-                      <Chip label="ONLINE" color="success" size="small" sx={{ fontWeight: 'bold' }} />
-                    ) : wan.status === 'down' ? (
-                      <Chip label="OFFLINE" color="error" size="small" sx={{ fontWeight: 'bold' }} />
-                    ) : (
-                      <Chip label="UNKNOWN" color="default" size="small" sx={{ fontWeight: 'bold' }} />
-                    )
-                  }
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
+                  <Chip
+                    label={
+                      wlan.status === 'ok' ? 'HEALTHY' :
+                        wlan.status === 'warning' ? 'WARNING' :
+                          wlan.status === 'unavailable' ? 'UNAVAILABLE' : 'UNKNOWN'
+                    }
+                    color={wlan.status === 'ok' ? 'success' : wlan.status === 'warning' ? 'warning' : 'default'}
+                    size="small"
+                    sx={{ fontWeight: 'bold' }}
+                  />
+                  <Typography variant="body2" sx={{ fontWeight: 'bold' }}>
+                    {wlan.num_user} active users
+                  </Typography>
+                </Box>
+
+                <Typography variant="body2" color="text.secondary" gutterBottom sx={{ mt: 2 }}>
+                  <UploadIcon sx={{ fontSize: 16, verticalAlign: 'text-bottom', mr: 0.5 }} />
+                  {wlan.tx_mbps} Mbps
+                  <DownloadIcon sx={{ fontSize: 16, verticalAlign: 'text-bottom', ml: 1, mr: 0.5 }} />
+                  {wlan.rx_mbps} Mbps (live)
                 </Typography>
 
-                {wan.status === 'unknown' ? (
-                  <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-                    Could not read WAN data from UniFi
-                  </Typography>
-                ) : (
-                  <>
-                    <Typography variant="body2" color="text.secondary" gutterBottom>
-                      IP Address: <Typography component="span" color="text.primary">{wan?.wan_ip || 'Unknown'}</Typography>
-                    </Typography>
-                    <Typography variant="body2" color="text.secondary" gutterBottom>
-                      Latency: <Typography component="span" color="text.primary">{wan?.latency ? `${wan.latency} ms` : '—'}</Typography>
-                    </Typography>
+                <Typography variant="body2" color="text.secondary" gutterBottom>
+                  {wlan.num_adopted} / {wlan.num_ap} APs adopted
+                </Typography>
 
-                    <Box sx={{ mt: 3, display: 'flex', justifyContent: 'space-between' }}>
-                      <Box>
-                        <Typography variant="caption" color="primary">Current Download</Typography>
-                        <Typography variant="h5" fontWeight="bold">{formatBytes((wan?.rx_mbps || 0) * 125000)}/s</Typography>
-                      </Box>
-                      <Box textAlign="right">
-                        <Typography variant="caption" color="secondary">Current Upload</Typography>
-                        <Typography variant="h5" fontWeight="bold">{formatBytes((wan?.tx_mbps || 0) * 125000)}/s</Typography>
-                      </Box>
-                    </Box>
-                  </>
-                )}
+                <Box sx={{ mt: 2, display: 'flex', alignItems: 'center', gap: 1 }}>
+                  {wlan.num_disconnected > 0 ? (
+                    <>
+                      <WarningIcon color="error" sx={{ fontSize: 18 }} />
+                      <Typography variant="body2" color="error.main" fontWeight="bold">
+                        {wlan.num_disconnected} AP(s) offline
+                      </Typography>
+                    </>
+                  ) : (
+                    <>
+                      <CheckCircleIcon color="success" sx={{ fontSize: 18 }} />
+                      <Typography variant="body2" color="success.main" fontWeight="bold">
+                        All APs operational
+                      </Typography>
+                    </>
+                  )}
+                </Box>
               </Box>
             ) : (
-              <Typography color="text.secondary">No WAN data available.</Typography>
+              <Typography color="text.secondary">No WiFi data available.</Typography>
             )}
           </Card>
         </Grid>
 
         <Grid item xs={12} md={8}>
           <Card sx={{ p: 3, height: '100%', minHeight: 300 }}>
-            <Typography variant="h6" gutterBottom>WAN Traffic — Last 24h</Typography>
+            <Typography variant="h6" gutterBottom>WiFi Traffic — Last 24h</Typography>
             <Box sx={{ height: 250, display: 'flex', flexDirection: 'column' }}>
               {formatHourlyData().length > 0 ? (
                 <ResponsiveContainer width="100%" height="100%">
                   <AreaChart data={formatHourlyData()} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
                     <defs>
                       <linearGradient id="colorRx" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.8} />
-                        <stop offset="95%" stopColor="#3b82f6" stopOpacity={0} />
-                      </linearGradient>
-                      <linearGradient id="colorTx" x1="0" y1="0" x2="0" y2="1">
                         <stop offset="5%" stopColor="#8b5cf6" stopOpacity={0.8} />
                         <stop offset="95%" stopColor="#8b5cf6" stopOpacity={0} />
+                      </linearGradient>
+                      <linearGradient id="colorTx" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.8} />
+                        <stop offset="95%" stopColor="#3b82f6" stopOpacity={0} />
                       </linearGradient>
                     </defs>
                     <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.1)" />
@@ -232,14 +250,14 @@ export default function Bandwidth() {
                       contentStyle={{ backgroundColor: '#111827', borderColor: '#3b82f6' }}
                     />
                     <Legend />
-                    <Area type="monotone" name="Download (RX)" dataKey="rx" stroke="#3b82f6" fillOpacity={1} fill="url(#colorRx)" />
-                    <Area type="monotone" name="Upload (TX)" dataKey="tx" stroke="#8b5cf6" fillOpacity={1} fill="url(#colorTx)" />
+                    <Area type="monotone" name="WiFi Download" dataKey="rx" stroke="#8b5cf6" fillOpacity={1} fill="url(#colorRx)" />
+                    <Area type="monotone" name="WiFi Upload" dataKey="tx" stroke="#3b82f6" fillOpacity={1} fill="url(#colorTx)" />
                   </AreaChart>
                 </ResponsiveContainer>
               ) : (
                 <Box sx={{ flexGrow: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                   <Alert severity="info" sx={{ bgcolor: 'rgba(59, 130, 246, 0.05)', border: '1px solid rgba(59, 130, 246, 0.2)' }}>
-                    No WAN traffic data available. This may be a UniFi reporting configuration issue.
+                    WiFi traffic history unavailable. Ensure statistics collection is enabled in UniFi controller settings (Settings → System → Statistics).
                   </Alert>
                 </Box>
               )}

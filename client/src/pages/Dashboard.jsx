@@ -1,26 +1,42 @@
-import React from 'react';
-import { Link as RouterLink } from 'react-router-dom';
-import { Box, Typography, Grid, Card, Chip, LinearProgress, Link } from '@mui/material';
-import { useQuery } from '@tanstack/react-query';
+import { Box, Typography, Grid, Card, Chip, LinearProgress, Link, Tooltip, IconButton } from '@mui/material';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import axios from 'axios';
 import StatCard from '../components/StatCard';
 import LiveDevicesModal from '../components/LiveDevicesModal';
+import { useSocket } from '../hooks/useSocket';
 import {
     Computer, Warning,
     Wifi as WifiIcon, SettingsEthernet as EthernetIcon, Devices as DevicesIcon,
     Public as PublicIcon, ShieldOutlined as ShieldIcon, ReportProblemOutlined as ReportProblemIcon,
-    NotificationsOutlined as NotificationsIcon
+    NotificationsOutlined as NotificationsIcon, WifiTetheringOutlined as APTetheringIcon,
+    WifiOutlined as WifiUserIcon, CheckCircleOutlined as CheckCircleIcon,
+    Refresh as RefreshIcon
 } from '@mui/icons-material';
 import { PieChart, Pie, Cell, Tooltip as RechartsTooltip, ResponsiveContainer } from 'recharts';
 
 export default function Dashboard() {
     const [liveModalOpen, setLiveModalOpen] = React.useState(false);
     const [liveModalTab, setLiveModalTab] = React.useState('all');
+    const queryClient = useQueryClient();
+    const socket = useSocket();
 
     const handleOpenLiveModal = (tab) => {
         setLiveModalTab(tab);
         setLiveModalOpen(true);
     };
+
+    React.useEffect(() => {
+        if (!socket) return;
+
+        const handleApAlert = (alert) => {
+            if (alert.type === 'ap_disconnected' || alert.type === 'ap_reconnected') {
+                queryClient.invalidateQueries(['wlanHealth']);
+            }
+        };
+
+        socket.on('alert:new', handleApAlert);
+        return () => socket.off('alert:new', handleApAlert);
+    }, [socket, queryClient]);
 
     const { data: devicesData } = useQuery({
         queryKey: ['devices'],
@@ -58,10 +74,16 @@ export default function Dashboard() {
         refetchInterval: 10000
     });
 
-    const { data: wanData } = useQuery({
-        queryKey: ['unifi', 'wan'],
-        queryFn: () => axios.get('/api/v1/unifi/wan').then(res => res.data),
-        refetchInterval: 30000
+    const { data: wlanHealthData } = useQuery({
+        queryKey: ['wlanHealth'],
+        queryFn: () => axios.get('/api/v1/unifi/wlan').then(res => res.data),
+        refetchInterval: 60000
+    });
+
+    const { data: unifiSettings } = useQuery({
+        queryKey: ['settings', 'unifi'],
+        queryFn: () => axios.get('/api/v1/settings').then(res => res.data),
+        staleTime: Infinity
     });
 
     const devices = devicesData?.devices || [];
@@ -88,13 +110,18 @@ export default function Dashboard() {
     const criticalAlerts = unreadAlerts?.critical_count || 0;
     const warningAlerts = unreadAlerts?.warning_count || 0;
 
-    // WAN Stats
-    const wanStats = wanData?.stats || { status: 'unknown', wan_ip: null, tx_mbps: '0', rx_mbps: '0' };
-    const isWanOnline = wanStats.status === 'up';
-    const isWanUnknown = wanStats.status === 'unknown';
-    const wanIp = wanStats.wan_ip || 'IP unavailable';
-    const txMbps = wanStats.tx_mbps;
-    const rxMbps = wanStats.rx_mbps;
+    // WLAN Stats
+    const wlan = wlanHealthData || {
+        status: 'unavailable', num_user: 0, num_ap: 0,
+        num_adopted: 0, num_disconnected: 0, num_pending: 0,
+        tx_mbps: '0.00', rx_mbps: '0.00'
+    };
+    const num_disconnected = wlan.num_disconnected || 0;
+    const num_ap = wlan.num_ap || 0;
+    const num_adopted = wlan.num_adopted || 0;
+    const num_pending = wlan.num_pending || 0;
+    const num_user = wlan.num_user || 0;
+    const unifi_url = unifiSettings?.unifi_url || '#';
 
     const pieData = [
         { name: 'Wired', value: wiredCount, color: '#22c55e' },
@@ -160,54 +187,136 @@ export default function Dashboard() {
                     />
                 </Grid>
                 <Grid item xs={12} sm={6} md={3}>
-                    <StatCard
-                        title="WAN Status"
-                        value={
-                            isWanOnline ? (
-                                <Chip label="Online" color="success" size="small" />
-                            ) : wanStats.status === 'down' ? (
-                                <Chip label="Offline" color="error" size="small" />
-                            ) : (
-                                <Chip label="Unknown" color="default" size="small" />
-                            )
-                        }
-                        subtitle={
-                            isWanUnknown ? (
-                                <Box>
-                                    <Typography variant="caption" color="text.secondary" display="block">
-                                        UniFi connected but WAN data unreadable
+                    <Card sx={{
+                        p: 2,
+                        height: '100%',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        borderLeft: `4px solid ${num_disconnected === 0 ? '#22c55e' : '#ef4444'}`,
+                        position: 'relative'
+                    }}>
+                        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 1 }}>
+                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                                <APTetheringIcon sx={{ color: 'text.secondary', fontSize: 20 }} />
+                                <Typography variant="overline" sx={{ fontWeight: 'bold', color: 'text.secondary', lineHeight: 1 }}>
+                                    Access Points
+                                </Typography>
+                            </Box>
+                        </Box>
+
+                        {/* TOP SECTION */}
+                        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1.5 }}>
+                            <Box>
+                                <Typography variant="h4" fontWeight="bold">
+                                    {num_adopted} / {num_ap}
+                                </Typography>
+                                <Typography variant="caption" color="text.secondary">adopted / total</Typography>
+                            </Box>
+                            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5, alignItems: 'flex-end' }}>
+                                <Box sx={{ px: 1, py: 0.2, borderRadius: 1, bgcolor: 'rgba(34, 197, 94, 0.1)', border: '1px solid rgba(34, 197, 94, 0.2)' }}>
+                                    <Typography variant="caption" sx={{ color: '#22c55e', fontSize: '0.7rem', fontWeight: 'bold' }}>
+                                        {num_adopted} online
                                     </Typography>
-                                    <Link component="button" variant="caption" onClick={() => console.log('WAN Debug Data:', wanStats)} sx={{ mt: 0.5 }}>
-                                        Check console logs
-                                    </Link>
                                 </Box>
+                                <Box sx={{
+                                    px: 1, py: 0.2, borderRadius: 1,
+                                    bgcolor: num_disconnected > 0 ? 'rgba(239, 68, 68, 0.1)' : 'rgba(156, 163, 175, 0.1)',
+                                    border: num_disconnected > 0 ? '1px solid rgba(239, 68, 68, 0.2)' : '1px solid rgba(156, 163, 175, 0.2)'
+                                }}>
+                                    <Typography variant="caption" sx={{ color: num_disconnected > 0 ? '#ef4444' : '#9ca3af', fontSize: '0.7rem', fontWeight: 'bold' }}>
+                                        {num_disconnected} offline
+                                    </Typography>
+                                </Box>
+                                {num_pending > 0 && (
+                                    <Box sx={{ px: 1, py: 0.2, borderRadius: 1, bgcolor: 'rgba(245, 158, 11, 0.1)', border: '1px solid rgba(245, 158, 11, 0.2)' }}>
+                                        <Typography variant="caption" sx={{ color: '#f59e0b', fontSize: '0.7rem', fontWeight: 'bold' }}>
+                                            {num_pending} pending
+                                        </Typography>
+                                    </Box>
+                                )}
+                            </Box>
+                        </Box>
+
+                        {/* MIDDLE SECTION 1 */}
+                        <Box sx={{ mb: 1 }}>
+                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.5 }}>
+                                <Typography variant="body2" sx={{ fontWeight: 'bold' }}>
+                                    ↑ {wlan.tx_mbps} Mbps  ↓ {wlan.rx_mbps} Mbps
+                                </Typography>
+                                <Chip
+                                    label={
+                                        wlan.status === 'ok' ? 'Healthy' :
+                                            wlan.status === 'warning' ? 'Warning' :
+                                                wlan.status === 'unavailable' ? 'Unavailable' : 'Unknown'
+                                    }
+                                    size="small"
+                                    sx={{
+                                        height: 18, fontSize: '0.65rem',
+                                        bgcolor: wlan.status === 'ok' ? 'rgba(34, 197, 94, 0.1)' : wlan.status === 'warning' ? 'rgba(245, 158, 11, 0.1)' : 'rgba(156, 163, 175, 0.1)',
+                                        color: wlan.status === 'ok' ? '#22c55e' : wlan.status === 'warning' ? '#f59e0b' : '#9ca3af',
+                                        border: 'none'
+                                    }}
+                                />
+                            </Box>
+                            <Typography variant="caption" color="text.secondary">current WiFi throughput</Typography>
+                        </Box>
+
+                        {/* MIDDLE SECTION 2 */}
+                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 'auto' }}>
+                            <WifiUserIcon sx={{ fontSize: 16, color: '#06b6d4' }} />
+                            <Typography variant="body2" sx={{ color: '#06b6d4', fontWeight: '500' }}>
+                                {num_user} active WiFi users
+                            </Typography>
+                        </Box>
+
+                        {/* BOTTOM SECTION */}
+                        <Box
+                            sx={{
+                                mt: 2, pt: 1, borderTop: '1px solid rgba(255,255,255,0.06)',
+                                display: 'flex', alignItems: 'center', gap: 1,
+                                cursor: num_disconnected > 0 ? 'pointer' : 'default',
+                                '&:hover': num_disconnected > 0 ? { bgcolor: 'rgba(255,255,255,0.02)' } : {}
+                            }}
+                            onClick={num_disconnected > 0 ? () => window.open(unifi_url, '_blank') : undefined}
+                        >
+                            {num_disconnected === 0 ? (
+                                <>
+                                    <CheckCircleIcon sx={{ fontSize: 16, color: 'success.main' }} />
+                                    <Typography variant="caption" sx={{ color: 'success.main', fontWeight: 'bold' }}>
+                                        All {num_ap} APs operational
+                                    </Typography>
+                                </>
                             ) : (
-                                <Box>
-                                    <Typography variant="caption" display="block">{wanIp}</Typography>
-                                    {isWanOnline && (
-                                        <>
-                                            <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block' }}>
-                                                ↑ {txMbps} Mbps  ↓ {rxMbps} Mbps
-                                            </Typography>
-                                            {wanStats.latency && (
-                                                <Typography variant="caption" sx={{ color: 'text.secondary' }}>
-                                                    Latency: {wanStats.latency}ms
-                                                </Typography>
-                                            )}
-                                        </>
-                                    )}
-                                </Box>
-                            )
-                        }
-                        color={isWanUnknown ? "#9ca3af" : (isWanOnline ? "#22c55e" : "#ef4444")}
-                        icon={<PublicIcon />}
-                    />
+                                <>
+                                    <Box sx={{
+                                        width: 8, height: 8, borderRadius: '50%', bgcolor: '#ef4444',
+                                        boxShadow: '0 0 6px #ef4444', animation: 'pulse-red 2s infinite'
+                                    }} />
+                                    <Typography variant="caption" sx={{ color: '#ef4444', fontWeight: 'bold' }}>
+                                        {num_disconnected} of {num_ap} AP(s) offline — check UniFi
+                                    </Typography>
+                                </>
+                            )}
+                        </Box>
+                        <style>{`
+                            @keyframes pulse-red {
+                                0% { opacity: 1; box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.4); }
+                                70% { opacity: 0.7; box-shadow: 0 0 0 6px rgba(239, 68, 68, 0); }
+                                100% { opacity: 1; box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
+                            }
+                        `}</style>
+                    </Card>
                 </Grid>
             </Grid>
 
-            {/* Inline equation */}
             <Typography variant="body2" color="text.secondary" sx={{ mb: 3, pl: 1 }}>
                 Total Online ({totalOnline}) = Wired <strong>{wiredCount}</strong> + WiFi <strong>{wirelessCount}</strong>
+                {' · '} <strong>{num_user}</strong> on WiFi · <strong>{num_ap}</strong> APs
+                {num_disconnected > 0 && (
+                    <span style={{ color: '#ef4444' }}>
+                        {' · '} ({num_disconnected} AP offline)
+                    </span>
+                )}
             </Typography>
 
             {/* ── ROW 2: Health & Alerts (3 cards) ── */}

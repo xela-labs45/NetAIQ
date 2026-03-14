@@ -111,6 +111,27 @@ module.exports = async function (fastify, opts) {
         }
     });
 
+    fastify.get('/wlan', async (request, reply) => {
+        try {
+            const data = await unifiService.getWlanHealth();
+            if (!data) {
+                return reply.send({
+                    status: 'unavailable',
+                    num_user: 0,
+                    num_ap: 0,
+                    num_adopted: 0,
+                    num_disconnected: 0,
+                    num_pending: 0,
+                    tx_mbps: '0.00',
+                    rx_mbps: '0.00'
+                });
+            }
+            reply.send(data);
+        } catch (err) {
+            reply.code(500).send({ error: true, message: err.message });
+        }
+    });
+
     fastify.post('/report/daily-user', async (request, reply) => {
         try {
             const { macs, start, end } = request.body;
@@ -123,8 +144,8 @@ module.exports = async function (fastify, opts) {
 
     fastify.post('/report/hourly-site', async (request, reply) => {
         try {
-            const { start, end } = request.body;
-            const data = await unifiService.getHourlySiteReport(start, end);
+            const { start, end, attrs } = request.body;
+            const data = await unifiService.getHourlySiteReport(start, end, attrs);
             reply.send({ data });
         } catch (err) {
             reply.code(500).send({ error: true, message: err.message });
@@ -146,6 +167,7 @@ module.exports = async function (fastify, opts) {
 
             reply.send({
                 health: health,
+                wlan_health: await unifiService.getWlanHealth(),
                 clients: (clients?.data || clients || []).slice(0, 2),
                 users: (users?.data || users || []).slice(0, 2),
                 daily_user: (daily_user?.data || daily_user || []).slice(0, 2)

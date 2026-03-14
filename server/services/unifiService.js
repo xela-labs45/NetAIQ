@@ -158,6 +158,36 @@ async function getDevices() {
     return getFromCacheOrFetch('devices', () => makeRequest('GET', '/stat/device'));
 }
 
+async function getWlanHealth() {
+    const settings = getSettings();
+    if (!settings.unifi_url || !settings.unifi_username || !settings.unifi_password) return null;
+
+    return getFromCacheOrFetch('wlanHealth', async () => {
+        const response = await makeRequest('GET', '/stat/health');
+        if (!response) return null;
+
+        const raw = Array.isArray(response)
+            ? response
+            : Array.isArray(response?.data)
+                ? response.data
+                : [];
+
+        const wlan = raw.find(s => s.subsystem === 'wlan');
+        if (!wlan) return null;
+
+        return {
+            status: wlan.status,
+            num_user: wlan.num_user || 0,
+            num_ap: wlan.num_ap || 0,
+            num_adopted: wlan.num_adopted || 0,
+            num_disconnected: wlan.num_disconnected || 0,
+            num_pending: wlan.num_pending || 0,
+            tx_mbps: ((wlan['tx_bytes-r'] || 0) * 8 / 1e6).toFixed(2),
+            rx_mbps: ((wlan['rx_bytes-r'] || 0) * 8 / 1e6).toFixed(2)
+        };
+    });
+}
+
 async function getSiteHealth() {
     const settings = getSettings();
     if (!settings.unifi_url || !settings.unifi_username || !settings.unifi_password) return null;
@@ -227,11 +257,15 @@ async function getClientsUsage(start, end, type = 'daily') {
     return makeRequest('POST', endpoint, body);
 }
 
-async function getHourlySiteReport(start, end) {
+async function getHourlySiteReport(start, end, attrs = null) {
     const settings = getSettings();
     if (!settings.unifi_url || !settings.unifi_username || !settings.unifi_password) return [];
+
+    // Default to WAN attrs if none provided
+    const defaultAttrs = ["wan-tx_bytes", "wan-rx_bytes", "time"];
+
     const body = {
-        attrs: ["wan-tx_bytes", "wan-rx_bytes", "time"],
+        attrs: attrs || defaultAttrs,
         start,
         end
     };
@@ -248,12 +282,10 @@ async function getHourlySiteReport(start, end) {
         return [];
     }
 
-    console.log('=== hourly.site first entry:', JSON.stringify(reportArray[0]));
-
     return reportArray.map(entry => ({
         time: entry.time || entry.datetime || entry.t,
-        tx_bytes: entry['wan-tx_bytes'] || entry.wan_tx_bytes || entry.tx_bytes || 0,
-        rx_bytes: entry['wan-rx_bytes'] || entry.wan_rx_bytes || entry.rx_bytes || 0
+        tx_bytes: entry['wan-tx_bytes'] || entry['wlan-tx_bytes'] || entry.wan_tx_bytes || entry.wlan_tx_bytes || entry.tx_bytes || 0,
+        rx_bytes: entry['wan-rx_bytes'] || entry['wlan-rx_bytes'] || entry.wan_rx_bytes || entry.wlan_rx_bytes || entry.rx_bytes || 0
     }));
 }
 
@@ -361,6 +393,7 @@ module.exports = {
     getAllUsers,
     getDevices,
     getSiteHealth,
+    getWlanHealth,
     getDailyUserReport,
     getClientsUsage,
     getHourlySiteReport,
