@@ -1,7 +1,15 @@
 const db = require('../db/database');
+const { z } = require('zod');
 const { scanSegment } = require('../services/scanService');
 const mergeService = require('../services/mergeService');
 const { Netmask } = require('netmask');
+
+const segmentSchema = z.object({
+    name: z.string().min(1, 'Name is required'),
+    cidr: z.string().regex(/^([0-9]{1,3}\.){3}[0-9]{1,3}\/([0-9]|[1-2][0-9]|3[0-2])$/, 'Invalid CIDR notation'),
+    description: z.string().optional().nullable(),
+    color: z.string().optional().nullable()
+});
 
 module.exports = async function (fastify, opts) {
     fastify.addHook('preValidation', fastify.authenticate);
@@ -35,10 +43,18 @@ module.exports = async function (fastify, opts) {
     });
 
     fastify.post('/', async (request, reply) => {
-        const { name, cidr, description, color } = request.body;
+        const validation = segmentSchema.safeParse(request.body);
+        if (!validation.success) {
+            return reply.code(400).send({
+                error: true,
+                message: validation.error.errors[0].message
+            });
+        }
+
+        const { name, cidr, description, color } = validation.data;
         try {
             const stmt = db.prepare('INSERT INTO segments (name, cidr, description, color) VALUES (?, ?, ?, ?)');
-            const info = stmt.run(name, cidr, description, color);
+            const info = stmt.run(name, cidr, description || null, color || null);
             const segment = db.prepare('SELECT * FROM segments WHERE id = ?').get(info.lastInsertRowid);
             reply.send({ segment });
         } catch (err) {
@@ -48,9 +64,17 @@ module.exports = async function (fastify, opts) {
 
     fastify.put('/:id', async (request, reply) => {
         const { id } = request.params;
-        const { name, cidr, description, color } = request.body;
+        const validation = segmentSchema.safeParse(request.body);
+        if (!validation.success) {
+            return reply.code(400).send({
+                error: true,
+                message: validation.error.errors[0].message
+            });
+        }
+
+        const { name, cidr, description, color } = validation.data;
         db.prepare('UPDATE segments SET name = ?, cidr = ?, description = ?, color = ? WHERE id = ?')
-            .run(name, cidr, description, color, id);
+            .run(name, cidr, description || null, color || null, id);
         const segment = db.prepare('SELECT * FROM segments WHERE id = ?').get(id);
         reply.send({ segment });
     });
@@ -63,6 +87,11 @@ module.exports = async function (fastify, opts) {
 
     fastify.post('/:id/scan', async (request, reply) => {
         const { id } = request.params;
+
+        const segment = db.prepare('SELECT id FROM segments WHERE id = ?').get(id);
+        if (!segment) {
+            return reply.code(404).send({ error: true, message: 'Segment not found' });
+        }
 
         // Run async, background task
         scanSegment(id, fastify).catch(err => fastify.log.error(err));

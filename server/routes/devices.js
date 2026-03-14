@@ -1,6 +1,17 @@
 const db = require('../db/database');
+const { z } = require('zod');
 const { pingDevice } = require('../services/pingService');
 const { mergeOnlineDevices, getOnlineCount } = require('../services/mergeService');
+
+const deviceSchema = z.object({
+    hostname: z.string().optional().nullable(),
+    ip_address: z.string().ip({ version: 'v4', message: 'Invalid IPv4 address' }),
+    mac_address: z.string().regex(/^([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})$/, 'Invalid MAC address format').optional().nullable().or(z.literal('')),
+    device_type: z.string().optional().default('workstation'),
+    segment_id: z.number().optional().nullable(),
+    is_critical: z.union([z.boolean(), z.number()]).optional().default(0),
+    notes: z.string().optional().nullable()
+});
 
 module.exports = async function (fastify, opts) {
 
@@ -103,7 +114,15 @@ module.exports = async function (fastify, opts) {
     });
 
     fastify.post('/', async (request, reply) => {
-        const { hostname, ip_address, mac_address, device_type, segment_id, is_critical, notes } = request.body;
+        const validation = deviceSchema.safeParse(request.body);
+        if (!validation.success) {
+            return reply.code(400).send({
+                error: true,
+                message: validation.error.errors[0].message
+            });
+        }
+
+        const { hostname, ip_address, mac_address, device_type, segment_id, is_critical, notes } = validation.data;
 
         try {
             const stmt = db.prepare(`
@@ -111,7 +130,7 @@ module.exports = async function (fastify, opts) {
         VALUES (?, ?, ?, ?, ?, ?, ?)
       `);
 
-            const info = stmt.run(hostname, ip_address, mac_address, device_type, segment_id || null, is_critical ? 1 : 0, notes);
+            const info = stmt.run(hostname || null, ip_address, mac_address || null, device_type, segment_id || null, is_critical ? 1 : 0, notes || null);
 
             const newDevice = db.prepare('SELECT * FROM devices WHERE id = ?').get(info.lastInsertRowid);
 
@@ -130,14 +149,22 @@ module.exports = async function (fastify, opts) {
 
     fastify.put('/:id', async (request, reply) => {
         const { id } = request.params;
-        const { hostname, ip_address, mac_address, device_type, segment_id, is_critical, notes } = request.body;
+        const validation = deviceSchema.safeParse(request.body);
+        if (!validation.success) {
+            return reply.code(400).send({
+                error: true,
+                message: validation.error.errors[0].message
+            });
+        }
+
+        const { hostname, ip_address, mac_address, device_type, segment_id, is_critical, notes } = validation.data;
 
         try {
             db.prepare(`
         UPDATE devices 
         SET hostname = ?, ip_address = ?, mac_address = ?, device_type = ?, segment_id = ?, is_critical = ?, notes = ?
         WHERE id = ?
-      `).run(hostname, ip_address, mac_address, device_type, segment_id || null, is_critical ? 1 : 0, notes, id);
+      `).run(hostname || null, ip_address, mac_address || null, device_type, segment_id || null, is_critical ? 1 : 0, notes || null, id);
 
             const device = db.prepare('SELECT * FROM devices WHERE id = ?').get(id);
             reply.send({ device });
