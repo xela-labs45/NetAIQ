@@ -277,7 +277,7 @@ export default function Dashboard() {
                         <Box sx={{ mb: 1 }}>
                             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.5 }}>
                                 <Typography variant="body2" sx={{ fontWeight: 'bold' }}>
-                                    ↑ {wlan.tx_mbps} Mbps  ↓ {wlan.rx_mbps} Mbps
+                                    ↓ {wlan.tx_mbps} Mbps  ↑ {wlan.rx_mbps} Mbps
                                 </Typography>
                                 <WlanStatusChip status={wlan.status} />
                             </Box>

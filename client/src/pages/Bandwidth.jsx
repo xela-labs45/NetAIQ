@@ -183,10 +183,10 @@ export default function Bandwidth() {
                 </Box>
 
                 <Typography variant="body2" color="text.secondary" gutterBottom sx={{ mt: 2 }}>
-                  <UploadIcon sx={{ fontSize: 16, verticalAlign: 'text-bottom', mr: 0.5 }} />
-                  {wlan.tx_mbps} Mbps
-                  <DownloadIcon sx={{ fontSize: 16, verticalAlign: 'text-bottom', ml: 1, mr: 0.5 }} />
-                  {wlan.rx_mbps} Mbps (live)
+                  <DownloadIcon sx={{ fontSize: 16, verticalAlign: 'text-bottom', mr: 0.5 }} />
+                  {wlan.tx_mbps} Mbps (Download)
+                  <UploadIcon sx={{ fontSize: 16, verticalAlign: 'text-bottom', ml: 1, mr: 0.5 }} />
+                  {wlan.rx_mbps} Mbps (Upload)
                 </Typography>
 
                 <Typography variant="body2" color="text.secondary" gutterBottom>
@@ -250,8 +250,8 @@ export default function Bandwidth() {
                       contentStyle={{ backgroundColor: '#111827', borderColor: '#3b82f6' }}
                     />
                     <Legend />
-                    <Area type="monotone" name="WiFi Download" dataKey="rx" stroke="#8b5cf6" fillOpacity={1} fill="url(#colorRx)" />
-                    <Area type="monotone" name="WiFi Upload" dataKey="tx" stroke="#3b82f6" fillOpacity={1} fill="url(#colorTx)" />
+                    <Area type="monotone" name="Upload" dataKey="rx" stroke="#8b5cf6" fillOpacity={1} fill="url(#colorRx)" />
+                    <Area type="monotone" name="Download" dataKey="tx" stroke="#3b82f6" fillOpacity={1} fill="url(#colorTx)" />
                   </AreaChart>
                 </ResponsiveContainer>
               ) : (
