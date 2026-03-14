@@ -2,7 +2,20 @@ const bcrypt = require('bcrypt');
 const db = require('../db/database');
 
 module.exports = async function (fastify, opts) {
-    fastify.post('/login', async (request, reply) => {
+    fastify.post('/login', {
+        config: {
+            rateLimit: {
+                max: 10,
+                timeWindow: '15m',
+                errorResponse: (request, reply) => {
+                    reply.status(429).send({
+                        error: true,
+                        message: 'Too many login attempts, try again in 15 minutes'
+                    });
+                }
+            }
+        }
+    }, async (request, reply) => {
         try {
             const { email, password } = request.body;
 

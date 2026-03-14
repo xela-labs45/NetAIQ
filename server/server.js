@@ -36,6 +36,10 @@ fastify.register(jwt, {
   }
 });
 
+fastify.register(require('@fastify/rate-limit'), {
+  global: false
+});
+
 // Middleware to verify JWT
 fastify.decorate('authenticate', async function (request, reply) {
   try {
