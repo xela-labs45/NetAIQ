@@ -11,23 +11,37 @@ let sessionCache = {
 let dataCache = new Map();
 
 function getSettings() {
-    const settings = db.prepare('SELECT key, value FROM settings').all();
-    return settings.reduce((acc, curr) => {
+    const rows = db.prepare(`
+        SELECT key, value FROM settings 
+        WHERE key LIKE 'unifi_%'
+    `).all();
+
+    const config = rows.reduce((acc, curr) => {
         acc[curr.key] = curr.value;
         return acc;
     }, {});
+
+    // Apply safe defaults
+    return {
+        unifi_url: config.unifi_url || null,
+        unifi_username: config.unifi_username || null,
+        unifi_password: config.unifi_password || null,
+        unifi_site: config.unifi_site || 'default',
+        unifi_ssl_verify: config.unifi_ssl_verify || 'false'
+    };
 }
 
 async function authenticate() {
     const settings = getSettings();
-    const { unifi_url, unifi_username, unifi_password, unifi_site } = settings;
+    const { unifi_url, unifi_username, unifi_password, unifi_ssl_verify } = settings;
 
     if (!unifi_url || !unifi_username || !unifi_password) {
         return false;
     }
 
+    const sslVerify = (unifi_ssl_verify === 'true' || unifi_ssl_verify === true || unifi_ssl_verify === '1');
     const httpsAgent = new https.Agent({
-        rejectUnauthorized: unifi_ssl_verify === '1'
+        rejectUnauthorized: sslVerify
     });
 
     try {
@@ -79,8 +93,9 @@ async function makeRequest(method, endpoint, data = null, retry = true) {
 
     const url = `${unifi_url}/proxy/network/api/s/${site}${endpoint}`;
 
+    const sslVerify = (unifi_ssl_verify === 'true' || unifi_ssl_verify === true || unifi_ssl_verify === '1');
     const httpsAgent = new https.Agent({
-        rejectUnauthorized: unifi_ssl_verify === '1'
+        rejectUnauthorized: sslVerify
     });
 
     const headers = {
@@ -126,22 +141,32 @@ async function getFromCacheOrFetch(key, fetchFn) {
 // ---------------------------------------------------------
 
 async function getClients() {
+    const settings = getSettings();
+    if (!settings.unifi_url || !settings.unifi_username || !settings.unifi_password) return null;
     return getFromCacheOrFetch('clients', () => makeRequest('GET', '/stat/sta'));
 }
 
 async function getAllUsers() {
+    const settings = getSettings();
+    if (!settings.unifi_url || !settings.unifi_username || !settings.unifi_password) return null;
     return getFromCacheOrFetch('users', () => makeRequest('GET', '/list/user'));
 }
 
 async function getDevices() {
+    const settings = getSettings();
+    if (!settings.unifi_url || !settings.unifi_username || !settings.unifi_password) return null;
     return getFromCacheOrFetch('devices', () => makeRequest('GET', '/stat/device'));
 }
 
 async function getSiteHealth() {
+    const settings = getSettings();
+    if (!settings.unifi_url || !settings.unifi_username || !settings.unifi_password) return null;
     return getFromCacheOrFetch('health', () => makeRequest('GET', '/stat/health'));
 }
 
 async function buildMacNameMap() {
+    const settings = getSettings();
+    if (!settings.unifi_url || !settings.unifi_username || !settings.unifi_password) return {};
     return getFromCacheOrFetch('macNameMap', async () => {
         const [clientsResponse, usersResponse] = await Promise.all([
             getClients(),
@@ -177,6 +202,8 @@ async function buildMacNameMap() {
 }
 
 async function getDailyUserReport(mac, start, end) {
+    const settings = getSettings();
+    if (!settings.unifi_url || !settings.unifi_username || !settings.unifi_password) return null;
     const body = {
         attrs: ["tx_bytes", "rx_bytes", "mac", "time"],
         start,
@@ -189,6 +216,8 @@ async function getDailyUserReport(mac, start, end) {
 }
 
 async function getClientsUsage(start, end, type = 'daily') {
+    const settings = getSettings();
+    if (!settings.unifi_url || !settings.unifi_username || !settings.unifi_password) return null;
     const body = {
         attrs: ["tx_bytes", "rx_bytes", "mac"],
         start,
@@ -199,6 +228,8 @@ async function getClientsUsage(start, end, type = 'daily') {
 }
 
 async function getHourlySiteReport(start, end) {
+    const settings = getSettings();
+    if (!settings.unifi_url || !settings.unifi_username || !settings.unifi_password) return [];
     const body = {
         attrs: ["wan-tx_bytes", "wan-rx_bytes", "time"],
         start,
@@ -227,6 +258,10 @@ async function getHourlySiteReport(start, end) {
 }
 
 async function getWanStats() {
+    const settings = getSettings();
+    if (!settings.unifi_url || !settings.unifi_username || !settings.unifi_password) {
+        return { status: 'unconfigured', wan_ip: null, tx_mbps: '0.00', rx_mbps: '0.00' };
+    }
     try {
         const responseData = await getSiteHealth();
 
