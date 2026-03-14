@@ -8,6 +8,22 @@ export default function Layout() {
     const socket = useSocket();
     const [toast, setToast] = useState({ open: false, message: '', severity: 'info' });
 
+    const SIDEBAR_EXPANDED = 240;
+    const SIDEBAR_COLLAPSED = 64;
+
+    const [sidebarOpen, setSidebarOpen] = useState(() => {
+        const saved = localStorage.getItem('sidebar_open');
+        return saved !== null ? saved === 'true' : true;
+    });
+
+    const toggleSidebar = () => {
+        setSidebarOpen(prev => {
+            const newState = !prev;
+            localStorage.setItem('sidebar_open', String(newState));
+            return newState;
+        });
+    };
+
     useEffect(() => {
         if (socket) {
             const handleNewAlert = (data) => {
@@ -34,8 +50,19 @@ export default function Layout() {
 
     return (
         <Box sx={{ display: 'flex', minHeight: '100vh' }}>
-            <Sidebar />
-            <Box component="main" sx={{ flexGrow: 1, p: 3, backgroundColor: 'background.default', overflow: 'auto' }}>
+            <Sidebar open={sidebarOpen} toggle={toggleSidebar} />
+            <Box
+                component="main"
+                sx={{
+                    flexGrow: 1,
+                    p: 3,
+                    backgroundColor: 'background.default',
+                    overflow: 'auto',
+                    marginLeft: 0,
+                    width: '100%',
+                    transition: 'all 0.25s cubic-bezier(0.4, 0, 0.2, 1)',
+                }}
+            >
                 <Outlet />
             </Box>
 

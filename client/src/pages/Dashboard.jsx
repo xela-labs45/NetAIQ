@@ -249,16 +249,11 @@ export default function Dashboard() {
                         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1.5 }}>
                             <Box>
                                 <Typography variant="h4" fontWeight="bold">
-                                    {num_adopted} / {num_ap}
+                                    {num_ap}
                                 </Typography>
-                                <Typography variant="caption" color="text.secondary">adopted / total</Typography>
+                                <Typography variant="caption" color="text.secondary">total APs</Typography>
                             </Box>
                             <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5, alignItems: 'flex-end' }}>
-                                <Box sx={{ px: 1, py: 0.2, borderRadius: 1, bgcolor: 'rgba(34, 197, 94, 0.1)', border: '1px solid rgba(34, 197, 94, 0.2)' }}>
-                                    <Typography variant="caption" sx={{ color: '#22c55e', fontSize: '0.7rem', fontWeight: 'bold' }}>
-                                        {num_adopted} online
-                                    </Typography>
-                                </Box>
                                 <Box sx={{
                                     px: 1, py: 0.2, borderRadius: 1,
                                     bgcolor: num_disconnected > 0 ? 'rgba(239, 68, 68, 0.1)' : 'rgba(156, 163, 175, 0.1)',
@@ -288,13 +283,6 @@ export default function Dashboard() {
                             </Box>
                         </Box>
 
-                        {/* MIDDLE SECTION 2 */}
-                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 'auto' }}>
-                            <WifiUserIcon sx={{ fontSize: 16, color: '#06b6d4' }} />
-                            <Typography variant="body2" sx={{ color: '#06b6d4', fontWeight: '500' }}>
-                                {num_user}
-                            </Typography>
-                        </Box>
 
                         {/* BOTTOM SECTION */}
                         <Box
