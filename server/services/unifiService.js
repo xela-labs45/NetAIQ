@@ -20,10 +20,10 @@ function getSettings() {
 
 async function authenticate() {
     const settings = getSettings();
-    const { unifi_url, unifi_username, unifi_password, unifi_ssl_verify } = settings;
+    const { unifi_url, unifi_username, unifi_password, unifi_site } = settings;
 
     if (!unifi_url || !unifi_username || !unifi_password) {
-        throw new Error('UniFi credentials not configured');
+        return false;
     }
 
     const httpsAgent = new https.Agent({
@@ -69,7 +69,8 @@ async function authenticate() {
 
 async function makeRequest(method, endpoint, data = null, retry = true) {
     if (Date.now() > sessionCache.expiresAt) {
-        await authenticate();
+        const authenticated = await authenticate();
+        if (!authenticated) return null;
     }
 
     const settings = getSettings();
@@ -312,6 +313,9 @@ async function getWanStats() {
         };
 
     } catch (err) {
+        if (err.message === 'UniFi credentials not configured') {
+            return { status: 'unconfigured', wan_ip: null, tx_mbps: '0.00', rx_mbps: '0.00' };
+        }
         console.error('getWanStats error:', err.message);
         return { status: 'unknown', wan_ip: null, tx_mbps: '0.00', rx_mbps: '0.00', error: err.message };
     }

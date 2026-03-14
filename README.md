@@ -65,19 +65,13 @@ cd netmon-dashboard
 cp .env.example .env
 ```
 
-Edit `.env` and set a strong `JWT_SECRET` at minimum. Configure UniFi and SMTP settings to enable those features.
+Edit `.env` and set a strong `JWT_SECRET` at minimum. UniFi and email settings are configured through the Settings page after first login — no additional environment variables needed.
 
 ```env
 PORT=3001
 NODE_ENV=production
 JWT_SECRET=your_strong_random_secret_here
 DB_PATH=./data/netmon.db
-
-# Optional: UniFi Controller
-UNIFI_URL=https://192.168.1.1
-UNIFI_USERNAME=your_unifi_user
-UNIFI_PASSWORD=your_unifi_password
-UNIFI_SITE=default
 ```
 
 ### 3. Build and run

@@ -14,6 +14,7 @@ async function sendEmailAlert(alert) {
     const { smtp_host, smtp_port, smtp_secure, smtp_user, smtp_pass, alert_from, alert_to } = settings;
 
     if (!smtp_host || !alert_to) {
+        console.warn('SMTP or alert recipient not configured in settings. Skipping email alert.');
         return false; // Email not configured
     }
 

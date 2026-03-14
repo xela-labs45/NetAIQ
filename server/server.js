@@ -8,6 +8,14 @@ const { Server } = require('socket.io');
 
 require('dotenv').config();
 
+// Boot-time validation
+const REQUIRED_ENV = ['JWT_SECRET', 'DB_PATH', 'PORT'];
+const missing = REQUIRED_ENV.filter(key => !process.env[key]);
+if (missing.length > 0) {
+  console.error(`FATAL: Missing required environment variables: ${missing.join(', ')}`);
+  process.exit(1);
+}
+
 // Register plugins
 fastify.register(cors, {
   origin: process.env.NODE_ENV === 'production' ? false : 'http://localhost:5173',
