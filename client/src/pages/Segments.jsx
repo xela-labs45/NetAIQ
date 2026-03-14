@@ -65,6 +65,7 @@ export default function Segments() {
     mutationFn: (newSeg) => axios.post('/api/v1/segments', newSeg),
     onSuccess: () => {
       queryClient.invalidateQueries(['segments']);
+      setFormData({ name: '', cidr: '', description: '', color: '#3b82f6' });
       handleClose();
     }
   });
@@ -80,6 +81,11 @@ export default function Segments() {
     } catch (err) {
       alert(err.response?.data?.message || 'Failed to start scan');
     }
+  };
+
+  const handleOpenAdd = () => {
+    setFormData({ name: '', cidr: '', description: '', color: '#3b82f6' });
+    setOpenAdd(true);
   };
 
   const handleClose = () => {
@@ -111,7 +117,7 @@ export default function Segments() {
     <Box>
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
         <Typography variant="h4" fontWeight="bold">Network Segments</Typography>
-        <Button variant="contained" startIcon={<AddIcon />} onClick={() => setOpenAdd(true)}>
+        <Button variant="contained" startIcon={<AddIcon />} onClick={handleOpenAdd}>
           Add Segment
         </Button>
       </Box>
