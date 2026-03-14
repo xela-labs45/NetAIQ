@@ -1,6 +1,10 @@
 node_modules
 client/node_modules
-server/public
-data
-.env
+server/node_modules
+client/dist
 .git
+.env
+data/
+*.log
+.DS_Store
+README.md
