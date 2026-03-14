@@ -1,3 +1,4 @@
+import React from 'react';
 import { Box, Typography, Grid, Card, Chip, LinearProgress, Link, Tooltip, IconButton } from '@mui/material';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import axios from 'axios';
@@ -13,6 +14,30 @@ import {
     Refresh as RefreshIcon
 } from '@mui/icons-material';
 import { PieChart, Pie, Cell, Tooltip as RechartsTooltip, ResponsiveContainer } from 'recharts';
+
+function WlanStatusChip({ status }) {
+    const config = {
+        ok: { label: 'Healthy', color: 'success' },
+        warning: { label: 'Warning', color: 'warning' },
+        unknown: { label: 'Unknown', color: 'default' },
+        unavailable: { label: 'Unavailable', color: 'default' }
+    };
+    const { label, color } = config[status] ?? { label: 'Unknown', color: 'default' };
+    return (
+        <Chip
+            label={label}
+            size="small"
+            color={color}
+            sx={{
+                height: 18, fontSize: '0.65rem',
+                bgcolor: color === 'success' ? 'rgba(34, 197, 94, 0.1)' : color === 'warning' ? 'rgba(245, 158, 11, 0.1)' : 'rgba(156, 163, 175, 0.1)',
+                color: color === 'success' ? '#22c55e' : color === 'warning' ? '#f59e0b' : '#9ca3af',
+                border: 'none',
+                fontWeight: 'bold'
+            }}
+        />
+    );
+}
 
 export default function Dashboard() {
     const [liveModalOpen, setLiveModalOpen] = React.useState(false);
@@ -110,18 +135,33 @@ export default function Dashboard() {
     const criticalAlerts = unreadAlerts?.critical_count || 0;
     const warningAlerts = unreadAlerts?.warning_count || 0;
 
-    // WLAN Stats
-    const wlan = wlanHealthData || {
-        status: 'unavailable', num_user: 0, num_ap: 0,
-        num_adopted: 0, num_disconnected: 0, num_pending: 0,
-        tx_mbps: '0.00', rx_mbps: '0.00'
+    // WLAN Stats - Safe destructure with defaults
+    const wlan = {
+        status: wlanHealthData?.status ?? 'unavailable',
+        num_user: wlanHealthData?.num_user ?? 0,
+        num_ap: wlanHealthData?.num_ap ?? 0,
+        num_adopted: wlanHealthData?.num_adopted ?? 0,
+        num_disconnected: wlanHealthData?.num_disconnected ?? 0,
+        num_pending: wlanHealthData?.num_pending ?? 0,
+        tx_mbps: wlanHealthData?.tx_mbps ?? '0.00',
+        rx_mbps: wlanHealthData?.rx_mbps ?? '0.00'
     };
-    const num_disconnected = wlan.num_disconnected || 0;
-    const num_ap = wlan.num_ap || 0;
-    const num_adopted = wlan.num_adopted || 0;
-    const num_pending = wlan.num_pending || 0;
-    const num_user = wlan.num_user || 0;
-    const unifi_url = unifiSettings?.unifi_url || '#';
+
+    const num_disconnected = wlan.num_disconnected;
+    const num_ap = wlan.num_ap;
+    const num_adopted = wlan.num_adopted;
+    const num_pending = wlan.num_pending;
+    const num_user = wlan.num_user;
+
+    const unifi_url = unifiSettings?.unifi_url
+        || unifiSettings?.data?.unifi_url
+        || '#';
+
+    const handleApCardClick = () => {
+        if (unifi_url && unifi_url !== '#') {
+            window.open(unifi_url, '_blank', 'noopener,noreferrer');
+        }
+    };
 
     const pieData = [
         { name: 'Wired', value: wiredCount, color: '#22c55e' },
@@ -243,20 +283,7 @@ export default function Dashboard() {
                                 <Typography variant="body2" sx={{ fontWeight: 'bold' }}>
                                     ↑ {wlan.tx_mbps} Mbps  ↓ {wlan.rx_mbps} Mbps
                                 </Typography>
-                                <Chip
-                                    label={
-                                        wlan.status === 'ok' ? 'Healthy' :
-                                            wlan.status === 'warning' ? 'Warning' :
-                                                wlan.status === 'unavailable' ? 'Unavailable' : 'Unknown'
-                                    }
-                                    size="small"
-                                    sx={{
-                                        height: 18, fontSize: '0.65rem',
-                                        bgcolor: wlan.status === 'ok' ? 'rgba(34, 197, 94, 0.1)' : wlan.status === 'warning' ? 'rgba(245, 158, 11, 0.1)' : 'rgba(156, 163, 175, 0.1)',
-                                        color: wlan.status === 'ok' ? '#22c55e' : wlan.status === 'warning' ? '#f59e0b' : '#9ca3af',
-                                        border: 'none'
-                                    }}
-                                />
+                                <WlanStatusChip status={wlan.status} />
                             </Box>
                             <Typography variant="caption" color="text.secondary">current WiFi throughput</Typography>
                         </Box>
@@ -277,7 +304,7 @@ export default function Dashboard() {
                                 cursor: num_disconnected > 0 ? 'pointer' : 'default',
                                 '&:hover': num_disconnected > 0 ? { bgcolor: 'rgba(255,255,255,0.02)' } : {}
                             }}
-                            onClick={num_disconnected > 0 ? () => window.open(unifi_url, '_blank') : undefined}
+                            onClick={handleApCardClick}
                         >
                             {num_disconnected === 0 ? (
                                 <>
@@ -312,9 +339,9 @@ export default function Dashboard() {
             <Typography variant="body2" color="text.secondary" sx={{ mb: 3, pl: 1 }}>
                 Total Online ({totalOnline}) = Wired <strong>{wiredCount}</strong> + WiFi <strong>{wirelessCount}</strong>
                 {' · '} <strong>{num_user}</strong> on WiFi · <strong>{num_ap}</strong> APs
-                {num_disconnected > 0 && (
+                {(wlan?.num_disconnected ?? 0) > 0 && (
                     <span style={{ color: '#ef4444' }}>
-                        {' · '} ({num_disconnected} AP offline)
+                        {' · '} ({wlan.num_disconnected} AP offline)
                     </span>
                 )}
             </Typography>

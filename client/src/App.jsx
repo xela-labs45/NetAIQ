@@ -22,16 +22,25 @@ function PrivateRoute({ children }) {
 }
 
 import { ErrorBoundary } from 'react-error-boundary';
-import { Box, Typography } from '@mui/material';
+import { Box, Typography, Alert, AlertTitle, Button } from '@mui/material';
 
-function ErrorFallback({ error }) {
+function PageErrorFallback({ error }) {
     return (
-        <Box sx={{ p: 4, color: 'error.main' }}>
-            <Typography variant="h6">Something went wrong:</Typography>
-            <Typography variant="body2" sx={{ fontFamily: 'monospace', mt: 1 }}>{error.message}</Typography>
-            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 2 }}>
-                Check browser console for details.
+        <Box sx={{ p: 4 }}>
+            <Alert severity="error">
+                <AlertTitle>Page Error</AlertTitle>
+                {error?.message || 'An unexpected error occurred'}
+            </Alert>
+            <Typography variant="body2" sx={{ mt: 2, fontFamily: 'monospace', color: 'text.secondary' }}>
+                {error?.stack?.split('\n')[1] || ''}
             </Typography>
+            <Button
+                variant="outlined"
+                sx={{ mt: 2 }}
+                onClick={() => window.location.reload()}
+            >
+                Reload Page
+            </Button>
         </Box>
     );
 }
@@ -42,16 +51,36 @@ function App() {
             <Route path="/login" element={<Login />} />
             <Route path="/" element={<PrivateRoute><Layout /></PrivateRoute>}>
                 <Route index element={<Navigate to="/dashboard" replace />} />
-                <Route path="dashboard" element={<Dashboard />} />
-                <Route path="devices" element={<Devices />} />
-                <Route path="segments" element={<Segments />} />
+                <Route path="dashboard" element={
+                    <ErrorBoundary FallbackComponent={PageErrorFallback}>
+                        <Dashboard />
+                    </ErrorBoundary>
+                } />
+                <Route path="devices" element={
+                    <ErrorBoundary FallbackComponent={PageErrorFallback}>
+                        <Devices />
+                    </ErrorBoundary>
+                } />
+                <Route path="segments" element={
+                    <ErrorBoundary FallbackComponent={PageErrorFallback}>
+                        <Segments />
+                    </ErrorBoundary>
+                } />
                 <Route path="bandwidth" element={
-                    <ErrorBoundary FallbackComponent={ErrorFallback}>
+                    <ErrorBoundary FallbackComponent={PageErrorFallback}>
                         <Bandwidth />
                     </ErrorBoundary>
                 } />
-                <Route path="alerts" element={<Alerts />} />
-                <Route path="settings" element={<Settings />} />
+                <Route path="alerts" element={
+                    <ErrorBoundary FallbackComponent={PageErrorFallback}>
+                        <Alerts />
+                    </ErrorBoundary>
+                } />
+                <Route path="settings" element={
+                    <ErrorBoundary FallbackComponent={PageErrorFallback}>
+                        <Settings />
+                    </ErrorBoundary>
+                } />
             </Route>
         </Routes>
     );
