@@ -21,6 +21,21 @@ function PrivateRoute({ children }) {
     return children;
 }
 
+import { ErrorBoundary } from 'react-error-boundary';
+import { Box, Typography } from '@mui/material';
+
+function ErrorFallback({ error }) {
+    return (
+        <Box sx={{ p: 4, color: 'error.main' }}>
+            <Typography variant="h6">Something went wrong:</Typography>
+            <Typography variant="body2" sx={{ fontFamily: 'monospace', mt: 1 }}>{error.message}</Typography>
+            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 2 }}>
+                Check browser console for details.
+            </Typography>
+        </Box>
+    );
+}
+
 function App() {
     return (
         <Routes>
@@ -30,7 +45,11 @@ function App() {
                 <Route path="dashboard" element={<Dashboard />} />
                 <Route path="devices" element={<Devices />} />
                 <Route path="segments" element={<Segments />} />
-                <Route path="bandwidth" element={<Bandwidth />} />
+                <Route path="bandwidth" element={
+                    <ErrorBoundary FallbackComponent={ErrorFallback}>
+                        <Bandwidth />
+                    </ErrorBoundary>
+                } />
                 <Route path="alerts" element={<Alerts />} />
                 <Route path="settings" element={<Settings />} />
             </Route>

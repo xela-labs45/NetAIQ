@@ -4,57 +4,73 @@ import { useQuery } from '@tanstack/react-query';
 import axios from 'axios';
 import { AreaChart, Area, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer, Legend } from 'recharts';
 import { format } from 'date-fns';
-import { Router as RouterIcon } from '@mui/icons-material';
+import { Router as RouterIcon, Download as DownloadIcon, Upload as UploadIcon, SignalWifiStatusbarConnectedNoInternet4 as OfflineIcon } from '@mui/icons-material';
+import { Skeleton, Chip } from '@mui/material';
 
 export default function Bandwidth() {
 
   const [timeRange, setTimeRange] = useState('today'); // 'today', '24h', '7d'
 
-  const { data: wanData, isLoading: wanLoading, error: wanError } = useQuery({
+  const { data: wanData, isLoading: wanLoading, isError: wanError } = useQuery({
     queryKey: ['unifi', 'wan'],
     queryFn: () => axios.get('/api/v1/unifi/wan').then(res => res.data),
-    refetchInterval: 60000
+    refetchInterval: 60000,
+    retry: 1
   });
 
-  const { data: clientsUsageData } = useQuery({
+  const { data: clientsUsageData, isLoading: clientsLoading, isError: clientsError } = useQuery({
     queryKey: ['unifi', 'clients-usage', timeRange],
     queryFn: () => {
-      let start, end = Date.now();
-      if (timeRange === 'today') {
-        start = new Date().setHours(0, 0, 0, 0);
-      } else if (timeRange === '24h') {
-        start = end - 86400000;
-      } else if (timeRange === '7d') {
-        start = end - 604800000;
-      }
+      const { start, end } = getTimeRange(timeRange);
       return axios.get(`/api/v1/unifi/clients-usage?start=${start}&end=${end}`).then(res => res.data);
     },
-    refetchInterval: 60000
+    refetchInterval: 60000,
+    retry: 1
   });
 
-  const { data: hourlyChart } = useQuery({
+  const { data: hourlyChart, isLoading: hourlyLoading, isError: hourlyError } = useQuery({
     queryKey: ['unifi', 'hourly'],
     queryFn: () => {
       const end = Date.now();
       const start = end - (24 * 60 * 60 * 1000); // 24 hours ago
       return axios.post('/api/v1/unifi/report/hourly-site', { start, end }).then(res => res.data);
     },
-    refetchInterval: 300000 // 5m
+    refetchInterval: 300000, // 5m
+    retry: 1
   });
 
+  function getTimeRange(range) {
+    const now = Date.now();
+    switch (range) {
+      case 'today':
+        return { start: new Date().setHours(0, 0, 0, 0), end: now };
+      case '24h':
+        return { start: now - 86400000, end: now };
+      case '7days':
+      case '7d':
+        return { start: now - 604800000, end: now };
+      default:
+        return { start: new Date().setHours(0, 0, 0, 0), end: now };
+    }
+  }
+
   const formatBytes = (bytes, decimals = 2) => {
-    if (!+bytes) return '0 Bytes';
+    if (bytes == null || isNaN(bytes) || bytes === 0) return '0 Bytes';
     const k = 1024;
     const dm = decimals < 0 ? 0 : decimals;
     const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB', 'PB', 'EB', 'ZB', 'YB'];
     const i = Math.floor(Math.log(bytes) / Math.log(k));
+    if (i < 0) return '0 Bytes';
     return `${parseFloat((bytes / Math.pow(k, i)).toFixed(dm))} ${sizes[i]}`;
   };
 
   const getTopClients = () => {
-    if (!clientsUsageData?.data) return [];
-    return [...clientsUsageData.data]
+    const rawClients = clientsUsageData?.data;
+    if (!Array.isArray(rawClients)) return [];
+
+    return [...rawClients]
       .map(c => {
+        if (!c) return null;
         let name = c.name || c.mac || 'Unknown';
         let originalName = name;
 
@@ -72,12 +88,13 @@ export default function Bandwidth() {
           isMac: name.startsWith('..:'),
           mac: c.mac || 'N/A',
           ip: c.ip || 'N/A',
-          totalRate: c.tx_bytes + c.rx_bytes,
-          tx: c.tx_bytes,
-          rx: c.rx_bytes
+          totalRate: (c.tx_bytes || 0) + (c.rx_bytes || 0),
+          tx: c.tx_bytes || 0,
+          rx: c.rx_bytes || 0
         };
       })
-      .sort((a, b) => b.totalRate - a.totalRate)
+      .filter(Boolean)
+      .sort((a, b) => (b.totalRate || 0) - (a.totalRate || 0))
       .slice(0, 15);
   };
 
@@ -98,22 +115,27 @@ export default function Bandwidth() {
   };
 
   const formatHourlyData = () => {
-    if (!hourlyChart?.data) return [];
-    return hourlyChart.data.map(d => ({
-      time: d.time,
-      tx: d['wan-tx_bytes'] || 0,
-      rx: d['wan-rx_bytes'] || 0
+    const rawData = hourlyChart?.data;
+    if (!Array.isArray(rawData)) return [];
+    return rawData.map(d => ({
+      time: d.time || Date.now(),
+      tx: d['wan-tx_bytes'] || d.tx_bytes || 0,
+      rx: d['wan-rx_bytes'] || d.rx_bytes || 0
     }));
   };
 
   const wan = wanData?.stats;
 
-  if (wanError) {
+  if (wanLoading || clientsLoading || hourlyLoading) {
+    return <BandwidthSkeleton />;
+  }
+
+  if (wanError || clientsError || hourlyError) {
     return (
-      <Box>
-        <Typography variant="h4" fontWeight="bold" gutterBottom>Bandwidth</Typography>
-        <Alert severity="warning">
-          Failed to load UniFi data. Please check your settings and connectivity to the UniFi Controller.
+      <Box sx={{ p: 3 }}>
+        <Typography variant="h4" fontWeight="bold" gutterBottom>Bandwidth Monitoring</Typography>
+        <Alert severity="error" sx={{ mt: 2 }}>
+          Failed to load network bandwidth data. Please verify your UniFi controller settings and connection status.
         </Alert>
       </Box>
     );
@@ -152,20 +174,20 @@ export default function Bandwidth() {
                 ) : (
                   <>
                     <Typography variant="body2" color="text.secondary" gutterBottom>
-                      IP Address: <Typography component="span" color="text.primary">{wan.wan_ip || 'Unknown'}</Typography>
+                      IP Address: <Typography component="span" color="text.primary">{wan?.wan_ip || 'Unknown'}</Typography>
                     </Typography>
                     <Typography variant="body2" color="text.secondary" gutterBottom>
-                      Latency: <Typography component="span" color="text.primary">{wan.latency ? `${wan.latency} ms` : '—'}</Typography>
+                      Latency: <Typography component="span" color="text.primary">{wan?.latency ? `${wan.latency} ms` : '—'}</Typography>
                     </Typography>
 
                     <Box sx={{ mt: 3, display: 'flex', justifyContent: 'space-between' }}>
                       <Box>
                         <Typography variant="caption" color="primary">Current Download</Typography>
-                        <Typography variant="h5" fontWeight="bold">{formatBytes(wan.rx_mbps * 125000)}/s</Typography>
+                        <Typography variant="h5" fontWeight="bold">{formatBytes((wan?.rx_mbps || 0) * 125000)}/s</Typography>
                       </Box>
                       <Box textAlign="right">
                         <Typography variant="caption" color="secondary">Current Upload</Typography>
-                        <Typography variant="h5" fontWeight="bold">{formatBytes(wan.tx_mbps * 125000)}/s</Typography>
+                        <Typography variant="h5" fontWeight="bold">{formatBytes((wan?.tx_mbps || 0) * 125000)}/s</Typography>
                       </Box>
                     </Box>
                   </>
@@ -296,6 +318,23 @@ export default function Bandwidth() {
         </Grid>
       </Grid>
 
+    </Box>
+  );
+}
+
+function BandwidthSkeleton() {
+  return (
+    <Box sx={{ p: 0 }}>
+      <Skeleton variant="text" width={400} height={60} sx={{ mb: 4 }} />
+      <Grid container spacing={3} sx={{ mb: 4 }}>
+        <Grid item xs={12} md={4}>
+          <Skeleton variant="rectangular" height={220} sx={{ borderRadius: 2 }} />
+        </Grid>
+        <Grid item xs={12} md={8}>
+          <Skeleton variant="rectangular" height={220} sx={{ borderRadius: 2 }} />
+        </Grid>
+      </Grid>
+      <Skeleton variant="rectangular" height={400} sx={{ borderRadius: 2 }} />
     </Box>
   );
 }
