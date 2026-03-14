@@ -286,14 +286,13 @@ export default function Dashboard() {
                                 </Typography>
                                 <WlanStatusChip status={wlan.status} />
                             </Box>
-                            <Typography variant="caption" color="text.secondary">current WiFi throughput</Typography>
                         </Box>
 
                         {/* MIDDLE SECTION 2 */}
                         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 'auto' }}>
                             <WifiUserIcon sx={{ fontSize: 16, color: '#06b6d4' }} />
                             <Typography variant="body2" sx={{ color: '#06b6d4', fontWeight: '500' }}>
-                                {num_user} active WiFi users
+                                {num_user}
                             </Typography>
                         </Box>
 
