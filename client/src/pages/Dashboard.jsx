@@ -110,6 +110,16 @@ export default function Dashboard() {
         }
     };
 
+    const scrollbarStyles = {
+        '&::-webkit-scrollbar': { width: '4px' },
+        '&::-webkit-scrollbar-track': { background: 'transparent' },
+        '&::-webkit-scrollbar-thumb': {
+            background: 'rgba(255,255,255,0.15)',
+            borderRadius: '4px'
+        },
+        '&::-webkit-scrollbar-thumb:hover': { background: 'rgba(255,255,255,0.3)' }
+    };
+
     return (
         <Box>
             <Typography variant="h4" gutterBottom fontWeight="bold">Dashboard</Typography>
@@ -251,7 +261,7 @@ export default function Dashboard() {
                 </Grid>
             </Grid>
 
-            <Grid container spacing={3}>
+            <Grid container spacing={3} alignItems="stretch">
                 {/* Left Column */}
                 <Grid item xs={12} md={8}>
                     <Grid container spacing={3}>
@@ -329,41 +339,99 @@ export default function Dashboard() {
                         </Grid>
                     </Grid>
 
-                    <Card sx={{ mt: 3, p: 3, overflowX: 'auto' }}>
-                        <Typography variant="h6" gutterBottom>Recent Alerts</Typography>
-                        <Box sx={{ minWidth: 600 }}>
-                            {recentAlerts.length === 0 && <Typography color="text.secondary">No recent alerts.</Typography>}
-                            {recentAlerts.map(alert => (
-                                <Box key={alert.id} sx={{ display: 'flex', alignItems: 'center', py: 1.5, borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
-                                    <Chip
-                                        label={alert.severity}
-                                        color={getSeverityColor(alert.severity)}
-                                        size="small"
-                                        sx={{ width: 80, mr: 2, textTransform: 'capitalize' }}
-                                    />
-                                    <Typography variant="body2" sx={{ flexGrow: 1 }}>
-                                        {alert.message}
+                    <Card sx={{
+                        mt: 3,
+                        height: '100%',
+                        display: 'flex',
+                        flexDirection: 'column'
+                    }}>
+                        <Box sx={{ p: 3, pb: 0, flexShrink: 0 }}>
+                            <Typography variant="h6">Recent Alerts</Typography>
+                        </Box>
+
+                        <Box sx={{
+                            flex: 1,
+                            maxHeight: 320,
+                            overflowY: 'auto',
+                            overflowX: 'hidden',
+                            px: 3,
+                            ...scrollbarStyles
+                        }}>
+                            <Box sx={{ minWidth: 400 }}>
+                                {recentAlerts.length === 0 && (
+                                    <Typography color="text.secondary" sx={{ py: 2 }}>
+                                        No recent alerts.
                                     </Typography>
-                                    <Typography variant="caption" color="text.secondary">
-                                        {new Date(alert.created_at).toLocaleString()}
-                                    </Typography>
-                                </Box>
-                            ))}
+                                )}
+                                {recentAlerts.map(alert => (
+                                    <Box key={alert.id} sx={{
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        py: 1.5,
+                                        borderBottom: '1px solid rgba(255,255,255,0.05)'
+                                    }}>
+                                        <Chip
+                                            label={alert.severity}
+                                            color={getSeverityColor(alert.severity)}
+                                            size="small"
+                                            sx={{ width: 80, mr: 2, textTransform: 'capitalize' }}
+                                        />
+                                        <Typography variant="body2" sx={{ flexGrow: 1 }}>
+                                            {alert.message}
+                                        </Typography>
+                                        <Typography variant="caption" color="text.secondary">
+                                            {new Date(alert.created_at).toLocaleString()}
+                                        </Typography>
+                                    </Box>
+                                ))}
+                            </Box>
+                        </Box>
+
+                        <Box sx={{
+                            p: '8px 16px',
+                            flexShrink: 0,
+                            borderTop: '1px solid rgba(255,255,255,0.06)',
+                            bgcolor: 'rgba(255,255,255,0.01)'
+                        }}>
+                            <Link
+                                component={RouterLink}
+                                to="/alerts"
+                                variant="caption"
+                                color="text.secondary"
+                                sx={{ textDecoration: 'none', '&:hover': { color: 'primary.main' } }}
+                            >
+                                View all {alertsData?.alerts?.length || 0} alerts →
+                            </Link>
                         </Box>
                     </Card>
                 </Grid>
 
                 {/* Right Column — Critical Devices */}
                 <Grid item xs={12} md={4}>
-                    <Card sx={{ p: 3, height: '100%', minHeight: 400 }}>
-                        <Typography variant="h6" gutterBottom color="error.main">Critical Devices</Typography>
-                        <Typography variant="body2" color="text.secondary" gutterBottom>
-                            Live status of devices marked as critical.
-                        </Typography>
+                    <Card sx={{
+                        height: '100%',
+                        display: 'flex',
+                        flexDirection: 'column'
+                    }}>
+                        <Box sx={{ p: 3, pb: 2, flexShrink: 0 }}>
+                            <Typography variant="h6" gutterBottom color="error.main">Critical Devices</Typography>
+                            <Typography variant="body2" color="text.secondary">
+                                Live status of devices marked as critical.
+                            </Typography>
+                        </Box>
 
-                        <Box sx={{ mt: 2 }}>
+                        <Box sx={{
+                            flex: 1,
+                            maxHeight: 320,
+                            overflowY: 'auto',
+                            overflowX: 'hidden',
+                            px: 3,
+                            ...scrollbarStyles
+                        }}>
                             {criticalDevices.length === 0 &&
-                                <Typography color="text.secondary">No critical devices configured.</Typography>
+                                <Typography color="text.secondary" sx={{ py: 2 }}>
+                                    No critical devices configured.
+                                </Typography>
                             }
                             {criticalDevices.map(device => {
                                 const mergedEntry = onlineDevices.find(d => d.ip === device.ip_address);
@@ -406,6 +474,33 @@ export default function Dashboard() {
                                     </Box>
                                 );
                             })}
+                        </Box>
+
+                        <Box sx={{
+                            p: '8px 16px',
+                            flexShrink: 0,
+                            borderTop: '1px solid rgba(255,255,255,0.1)',
+                            bgcolor: 'rgba(255,255,255,0.01)'
+                        }}>
+                            {criticalTotal === 0 ? (
+                                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                    <Typography variant="caption" color="text.secondary">
+                                        No critical devices configured
+                                    </Typography>
+                                    <Link
+                                        component={RouterLink}
+                                        to="/settings?tab=critical"
+                                        variant="caption"
+                                        sx={{ textDecoration: 'none', '&:hover': { color: 'primary.main' } }}
+                                    >
+                                        Configure in Settings →
+                                    </Link>
+                                </Box>
+                            ) : (
+                                <Typography variant="caption" color="text.secondary">
+                                    {criticalTotal} critical device(s) monitored
+                                </Typography>
+                            )}
                         </Box>
                         <style>{`
               @keyframes pulse {
