@@ -16,14 +16,12 @@
 
 ## ✨ Features
 
-- 📡 **Real-time Device Monitoring** — ICMP ping checks for all tracked devices with live status updates
+- 📡 **Real-time Device Monitoring** — ICMP ping checks with live status and interactive "Live Devices" modal (Wired/Wireless filtering)
 - 🏢 **Network Segments** — Organise devices by subnet (CIDR), with automated host discovery scanning
-- 📊 **Bandwidth & UniFi Integration** — Pulls clients, devices, WAN stats, and hourly/daily reports from a UniFi Controller
-- 🚨 **Alerting System** — Configurable email alerts (via SMTP/Nodemailer) for device up/down events and high latency
-- 🔔 **In-App Notifications** — Real-time alerts pushed via WebSockets (Socket.IO)
-- 🔐 **Secure Access** — JWT-based authentication with HTTP-only cookies, forced password change on first login
-- 🗃️ **Lightweight Storage** — SQLite database via `better-sqlite3`, zero external database dependencies
-- 🐳 **Docker-Ready** — Single-container deployment with a multi-stage Dockerfile
+- 📊 **Intelligent Bandwidth Monitoring** — Pulls clients, WAN stats, and usage reports from UniFi with MAC-to-hostname resolution
+- 🚨 **Bulk Device Management** — Register multiple discovered devices to tracking in a single click
+- 📧 **Automated Alerting** — Configurable email alerts (SMTP) for device events and high latency
+- 🔐 **Secure & Lightweight** — JWT authentication, SQLite storage, and boot-time configuration validation
 
 ---
 
@@ -100,10 +98,8 @@ All settings can be configured from the **Settings** page in the UI after loggin
 
 | Setting | Description |
 |---|---|
-| **UniFi URL** | Base URL of your UniFi controller (e.g. `https://192.168.1.1`) |
-| **UniFi Credentials** | Username and password for your UniFi controller |
-| **SMTP Host/Port** | Mail server for email alerts |
-| **Alert Types** | Toggle alerts for device offline, online, and high latency events |
+| **UniFi Controller** | URL and credentials for UniFi integration (Managed in UI) |
+| **SMTP / Email** | Mail server and recipient settings for alerts (Managed in UI) |
 | **Ping Interval** | How often to ping tracked devices (default: 60s) |
 | **UniFi Sync Interval** | How often to pull data from UniFi (default: 5 min) |
 | **Alert Cooldown** | Minimum time between repeated alerts for the same device (default: 15 min) |
@@ -129,8 +125,8 @@ All endpoints are prefixed with `/api/v1/` and require authentication (JWT cooki
 |---|---|---|
 | `POST` | `/auth/login` | Log in and receive JWT cookie |
 | `POST` | `/auth/logout` | Clear the JWT cookie |
-| `GET` | `/auth/me` | Get current user info |
-| `GET/POST/PUT/DELETE` | `/devices` | Manage tracked devices |
+| `GET` | `/devices/online` | Get unique online devices with `?connection=` filter |
+| `POST` | `/devices/bulk` | Bulk register discovered devices |
 | `POST` | `/devices/:id/ping` | Trigger an immediate ping |
 | `GET` | `/devices/:id/history` | Get ping history |
 | `GET` | `/devices/:id/uptime` | Get uptime stats |
@@ -141,6 +137,8 @@ All endpoints are prefixed with `/api/v1/` and require authentication (JWT cooki
 | `PUT` | `/alerts/read-all` | Mark all alerts as read |
 | `GET` | `/unifi/clients` | Get UniFi clients |
 | `GET` | `/unifi/wan` | Get WAN stats |
+| `GET` | `/unifi/clients-usage` | Get Top Clients with hostname resolution |
+| `GET` | `/unifi/debug` | Inspect raw UniFi API responses |
 | `GET/PUT` | `/settings` | Read/update application settings |
 
 ---
