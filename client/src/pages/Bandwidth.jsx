@@ -35,20 +35,6 @@ export default function Bandwidth() {
     retry: 1
   });
 
-  const { data: hourlyChart, isLoading: hourlyLoading, isError: hourlyError } = useQuery({
-    queryKey: ['unifi', 'hourly-wifi'],
-    queryFn: () => {
-      const end = Date.now();
-      const start = end - (24 * 60 * 60 * 1000); // 24 hours ago
-      return axios.post('/api/v1/unifi/report/hourly-site', {
-        start,
-        end,
-        attrs: ["wlan-tx_bytes", "wlan-rx_bytes", "time"]
-      }).then(res => res.data);
-    },
-    refetchInterval: 300000, // 5m
-    retry: 1
-  });
 
   function getTimeRange(range) {
     const now = Date.now();
@@ -125,23 +111,14 @@ export default function Bandwidth() {
     return null;
   };
 
-  const formatHourlyData = () => {
-    const rawData = hourlyChart?.data;
-    if (!Array.isArray(rawData)) return [];
-    return rawData.map(d => ({
-      time: d.time || d.datetime || Date.now(),
-      tx: d['wlan-tx_bytes'] || d.tx_bytes || 0,
-      rx: d['wlan-rx_bytes'] || d.rx_bytes || 0
-    }));
-  };
 
   const wlan = wlanData;
 
-  if (wlanLoading || clientsLoading || hourlyLoading) {
+  if (wlanLoading || clientsLoading) {
     return <BandwidthSkeleton />;
   }
 
-  if (wlanError || clientsError || hourlyError) {
+  if (wlanError || clientsError) {
     return (
       <Box sx={{ p: 3 }}>
         <Typography variant="h4" fontWeight="bold" gutterBottom>Bandwidth Monitoring</Typography>
@@ -158,7 +135,7 @@ export default function Bandwidth() {
 
       {/* WiFi Summary */}
       <Grid container spacing={3} sx={{ mb: 4 }}>
-        <Grid item xs={12} md={4}>
+        <Grid item xs={12}>
           <Card sx={{ p: 3, display: 'flex', flexDirection: 'column', height: '100%', position: 'relative', overflow: 'hidden' }}>
             <Box sx={{ position: 'absolute', right: -20, bottom: -20, opacity: 0.1 }}>
               <APTetheringIcon sx={{ fontSize: 180 }} />
@@ -216,54 +193,6 @@ export default function Bandwidth() {
             )}
           </Card>
         </Grid>
-
-        <Grid item xs={12} md={8}>
-          <Card sx={{ p: 3, height: '100%', minHeight: 300 }}>
-            <Typography variant="h6" gutterBottom>WiFi Traffic — Last 24h</Typography>
-            <Box sx={{ height: 250, display: 'flex', flexDirection: 'column' }}>
-              {formatHourlyData().length > 0 ? (
-                <ResponsiveContainer width="100%" height="100%">
-                  <AreaChart data={formatHourlyData()} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
-                    <defs>
-                      <linearGradient id="colorRx" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%" stopColor="#8b5cf6" stopOpacity={0.8} />
-                        <stop offset="95%" stopColor="#8b5cf6" stopOpacity={0} />
-                      </linearGradient>
-                      <linearGradient id="colorTx" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.8} />
-                        <stop offset="95%" stopColor="#3b82f6" stopOpacity={0} />
-                      </linearGradient>
-                    </defs>
-                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.1)" />
-                    <XAxis
-                      dataKey="time"
-                      tickFormatter={(tick) => format(new Date(tick), 'HH:mm')}
-                      stroke="#888"
-                    />
-                    <YAxis
-                      tickFormatter={(tick) => formatBytes(tick)}
-                      stroke="#888"
-                    />
-                    <RechartsTooltip
-                      labelFormatter={(label) => format(new Date(label), 'MMM dd, HH:mm')}
-                      formatter={(value) => formatBytes(value)}
-                      contentStyle={{ backgroundColor: '#111827', borderColor: '#3b82f6' }}
-                    />
-                    <Legend />
-                    <Area type="monotone" name="Upload" dataKey="rx" stroke="#8b5cf6" fillOpacity={1} fill="url(#colorRx)" />
-                    <Area type="monotone" name="Download" dataKey="tx" stroke="#3b82f6" fillOpacity={1} fill="url(#colorTx)" />
-                  </AreaChart>
-                </ResponsiveContainer>
-              ) : (
-                <Box sx={{ flexGrow: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                  <Alert severity="info" sx={{ bgcolor: 'rgba(59, 130, 246, 0.05)', border: '1px solid rgba(59, 130, 246, 0.2)' }}>
-                    WiFi traffic history unavailable. Ensure statistics collection is enabled in UniFi controller settings (Settings → System → Statistics).
-                  </Alert>
-                </Box>
-              )}
-            </Box>
-          </Card>
-        </Grid>
       </Grid>
 
       <Grid container spacing={3}>
@@ -291,7 +220,6 @@ export default function Bandwidth() {
               >
                 <ToggleButton value="today">Today</ToggleButton>
                 <ToggleButton value="24h">24h</ToggleButton>
-                <ToggleButton value="7d">7 Days</ToggleButton>
               </ToggleButtonGroup>
             </Box>
             <Box sx={{ height: 350 }}>
@@ -345,10 +273,7 @@ function BandwidthSkeleton() {
     <Box sx={{ p: 0 }}>
       <Skeleton variant="text" width={400} height={60} sx={{ mb: 4 }} />
       <Grid container spacing={3} sx={{ mb: 4 }}>
-        <Grid item xs={12} md={4}>
-          <Skeleton variant="rectangular" height={220} sx={{ borderRadius: 2 }} />
-        </Grid>
-        <Grid item xs={12} md={8}>
+        <Grid item xs={12}>
           <Skeleton variant="rectangular" height={220} sx={{ borderRadius: 2 }} />
         </Grid>
       </Grid>
