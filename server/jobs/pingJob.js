@@ -36,9 +36,27 @@ module.exports = function (fastify) {
         // Concurrency limit to avoid overwhelming network
         const limit = pLimit(10);
 
-        const tasks = devices.map(device => limit(() => pingDevice(device, fastify)));
+        const tasks = devices.map(device => limit(async () => {
+            let retries = 2;
+            while (retries >= 0) {
+                try {
+                    await pingDevice(device, fastify);
+                    return; // Success, exit retry loop
+                } catch (err) {
+                    if (retries === 0) {
+                        fastify.log.error(`Device ${device.hostname || device.ip_address} ping failed after retries: ${err.message}`);
+                    } else {
+                        fastify.log.warn(`Device ${device.hostname || device.ip_address} ping failed, retrying... (${retries} left)`);
+                        // Wait 1s before retry
+                        await new Promise(res => setTimeout(res, 1000));
+                    }
+                    retries--;
+                }
+            }
+        }));
 
-        await Promise.all(tasks);
+        // Use allSettled to ensure we wait for all devices even if some have terminal errors
+        await Promise.allSettled(tasks);
         fastify.log.info(`Ping job completed for ${devices.length} devices.`);
     });
 };
