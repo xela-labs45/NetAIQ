@@ -103,8 +103,8 @@ export default function Bandwidth() {
           <Typography variant="subtitle2" fontWeight="bold" gutterBottom>{data.originalName}</Typography>
           <Typography variant="body2" color="text.secondary">IP: {data.ip}</Typography>
           <Typography variant="body2" color="text.secondary" gutterBottom>MAC: {data.mac}</Typography>
-          <Typography variant="body2" sx={{ color: '#8b5cf6' }}>Upload: {formatBytes(data.tx)}</Typography>
-          <Typography variant="body2" sx={{ color: '#3b82f6' }}>Download: {formatBytes(data.rx)}</Typography>
+          <Typography variant="body2" sx={{ color: '#8b5cf6' }}>Upload (RX): {formatBytes(data.rx)}</Typography>
+          <Typography variant="body2" sx={{ color: '#3b82f6' }}>Download (TX): {formatBytes(data.tx)}</Typography>
         </Paper>
       );
     }
@@ -255,8 +255,8 @@ export default function Bandwidth() {
                   />
                   <RechartsTooltip content={<CustomTooltip />} />
                   <Legend />
-                  <Bar dataKey="rx" name="Download (RX)" stackId="a" fill="#3b82f6" />
-                  <Bar dataKey="tx" name="Upload (TX)" stackId="a" fill="#8b5cf6" />
+                  <Bar dataKey="tx" name="Download (TX)" stackId="a" fill="#3b82f6" />
+                  <Bar dataKey="rx" name="Upload (RX)" stackId="a" fill="#8b5cf6" />
                 </BarChart>
               </ResponsiveContainer>
             </Box>
