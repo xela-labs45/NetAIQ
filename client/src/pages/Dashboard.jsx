@@ -16,29 +16,6 @@ import {
 } from '@mui/icons-material';
 import { PieChart, Pie, Cell, Tooltip as RechartsTooltip, ResponsiveContainer } from 'recharts';
 
-function WlanStatusChip({ status }) {
-    const config = {
-        ok: { label: 'Healthy', color: 'success' },
-        warning: { label: 'Warning', color: 'warning' },
-        unknown: { label: 'Unknown', color: 'default' },
-        unavailable: { label: 'Unavailable', color: 'default' }
-    };
-    const { label, color } = config[status] ?? { label: 'Unknown', color: 'default' };
-    return (
-        <Chip
-            label={label}
-            size="small"
-            color={color}
-            sx={{
-                height: 18, fontSize: '0.65rem',
-                bgcolor: color === 'success' ? 'rgba(34, 197, 94, 0.1)' : color === 'warning' ? 'rgba(245, 158, 11, 0.1)' : 'rgba(156, 163, 175, 0.1)',
-                color: color === 'success' ? '#22c55e' : color === 'warning' ? '#f59e0b' : '#9ca3af',
-                border: 'none',
-                fontWeight: 'bold'
-            }}
-        />
-    );
-}
 
 export default function Dashboard() {
     const [liveModalOpen, setLiveModalOpen] = React.useState(false);
@@ -274,13 +251,10 @@ export default function Dashboard() {
                         </Box>
 
                         {/* MIDDLE SECTION 1 */}
-                        <Box sx={{ mb: 1 }}>
-                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.5 }}>
-                                <Typography variant="body2" sx={{ fontWeight: 'bold' }}>
-                                    ↓ {wlan.tx_mbps} Mbps  ↑ {wlan.rx_mbps} Mbps
-                                </Typography>
-                                <WlanStatusChip status={wlan.status} />
-                            </Box>
+                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.5 }}>
+                            <Typography variant="body2" sx={{ fontWeight: 'bold' }}>
+                                ↓ {wlan.tx_mbps} Mbps  ↑ {wlan.rx_mbps} Mbps
+                            </Typography>
                         </Box>
 
 
@@ -324,15 +298,6 @@ export default function Dashboard() {
                 </Grid>
             </Grid>
 
-            <Typography variant="body2" color="text.secondary" sx={{ mb: 3, pl: 1 }}>
-                Total Online ({totalOnline}) = Wired <strong>{wiredCount}</strong> + WiFi <strong>{wirelessCount}</strong>
-                {' · '} <strong>{num_user}</strong> on WiFi · <strong>{num_ap}</strong> APs
-                {(wlan?.num_disconnected ?? 0) > 0 && (
-                    <span style={{ color: '#ef4444' }}>
-                        {' · '} ({wlan.num_disconnected} AP offline)
-                    </span>
-                )}
-            </Typography>
 
             {/* ── BOTTOM GRID SECTION (3 Rows) ── */}
             <Box sx={{
