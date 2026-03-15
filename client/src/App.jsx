@@ -31,9 +31,11 @@ function PageErrorFallback({ error }) {
                 <AlertTitle>Page Error</AlertTitle>
                 {error?.message || 'An unexpected error occurred'}
             </Alert>
-            <Typography variant="body2" sx={{ mt: 2, fontFamily: 'monospace', color: 'text.secondary' }}>
-                {error?.stack?.split('\n')[1] || ''}
-            </Typography>
+            {import.meta.env.DEV && (
+                <Typography variant="body2" sx={{ mt: 2, fontFamily: 'monospace', color: 'text.secondary' }}>
+                    {error?.stack?.split('\n')[1] || ''}
+                </Typography>
+            )}
             <Button
                 variant="outlined"
                 sx={{ mt: 2 }}
