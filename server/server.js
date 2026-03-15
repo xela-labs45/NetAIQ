@@ -5,7 +5,6 @@ const fastifyStatic = require('@fastify/static');
 const jwt = require('@fastify/jwt');
 const fastifyCookie = require('@fastify/cookie');
 const { Server } = require('socket.io');
-const jsonwebtoken = require('jsonwebtoken');
 
 require('dotenv').config();
 
@@ -92,15 +91,15 @@ const start = async () => {
 
     fastify.decorate('io', io);
 
-    // Socket.IO authentication middleware
-    io.use((socket, next) => {
+    // Socket.IO authentication middleware using Fastify's JWT pipeline
+    io.use(async (socket, next) => {
       try {
         const cookie = socket.handshake.headers.cookie;
         if (!cookie) {
           return next(new Error('Authentication error: No cookies found'));
         }
 
-        // Extract token from cookie (format: token=xyz; other=abc)
+        // Standard parsing for 'token' cookie
         const tokenMatch = cookie.match(/token=([^;]+)/);
         const token = tokenMatch ? tokenMatch[1] : null;
 
@@ -108,12 +107,13 @@ const start = async () => {
           return next(new Error('Authentication error: Token not found'));
         }
 
-        const decoded = jsonwebtoken.verify(token, process.env.JWT_SECRET);
+        // Use fastify.jwt for unified verification logic
+        const decoded = await fastify.jwt.verify(token);
         socket.user = decoded;
         next();
       } catch (err) {
         fastify.log.error(`Socket auth failed: ${err.message}`);
-        next(new Error('Authentication error: Invalid token'));
+        next(new Error('Authentication error: Invalid or expired token'));
       }
     });
 
