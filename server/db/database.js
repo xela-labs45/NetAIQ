@@ -41,6 +41,6 @@ if (tableCheck.count === 0) {
 }
 
 // Reset potentially stale locks on startup
-db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('scan_running', '0')").run();
+db.prepare("DELETE FROM settings WHERE key = 'scan_running'").run();
 
 module.exports = db;

@@ -4,14 +4,15 @@ const pingService = require('./pingService');
 const db = require('../db/database');
 
 async function scanSegment(segmentId, fastify) {
-    // Database-backed lock check
-    const lockCheck = db.prepare('SELECT value FROM settings WHERE key = ?').get('scan_running');
-    if (lockCheck?.value === '1') {
-        throw new Error('A scan is already in progress.');
+    // Atomic lock using unique constraint on 'key'
+    try {
+        db.prepare("INSERT INTO settings (key, value) VALUES ('scan_running', '1')").run();
+    } catch (err) {
+        if (err.code === 'SQLITE_CONSTRAINT_UNIQUE' || err.code === 'SQLITE_CONSTRAINT_PRIMARYKEY') {
+            throw new Error('A scan is already in progress.');
+        }
+        throw err;
     }
-
-    // Atomic-like set
-    db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('scan_running', '1')").run();
 
     try {
         const segment = db.prepare('SELECT id, cidr FROM segments WHERE id = ?').get(segmentId);
@@ -79,7 +80,7 @@ async function scanSegment(segmentId, fastify) {
         return results;
 
     } finally {
-        db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('scan_running', '0')").run();
+        db.prepare("DELETE FROM settings WHERE key = 'scan_running'").run();
     }
 }
 
