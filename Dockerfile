@@ -23,18 +23,27 @@ RUN npm run build
 # Production image
 FROM node:20-alpine
 
-WORKDIR /app
-
-# Copy package.json and only install production dependencies
-COPY package*.json ./
-RUN npm install --omit=dev
-
-# Copy built frontend from the previous stage
-COPY --from=build /app/server ./server
-
-# Set permissions or specific non-root user if needed, but keeping it simple
+# Set environment
 ENV NODE_ENV=production
 ENV PORT=3001
+
+WORKDIR /app
+
+# Create non-root user and prepare data directory
+RUN addgroup -g 1001 -S nodejs && \
+    adduser -S nodejs -u 1001 && \
+    mkdir -p /app/data && \
+    chown -R nodejs:nodejs /app
+
+# Copy package.json and only install production dependencies
+COPY --chown=nodejs:nodejs package*.json ./
+RUN npm install --omit=dev
+
+# Copy built files from the build stage
+COPY --from=build --chown=nodejs:nodejs /app/server ./server
+
+# Switch to non-root user
+USER nodejs
 
 EXPOSE 3001
 
