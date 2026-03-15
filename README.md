@@ -140,7 +140,6 @@ All endpoints are prefixed with `/api/v1/` and require authentication (JWT cooki
 | `GET` | `/unifi/wan` | Get WAN throughput and status |
 | `GET` | `/unifi/wlan` | Get Access Point health and WiFi throughput |
 | `GET` | `/unifi/clients-usage` | Get Top Clients with hostname resolution |
-| `GET` | `/unifi/debug` | Inspect raw UniFi API responses |
 | `GET/PUT` | `/settings` | Read/update application settings |
 
 ---

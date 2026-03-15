@@ -152,8 +152,15 @@ module.exports = async function (fastify, opts) {
         }
     });
 
-    // Temporary Debug Endpoint
+    // Protected Debug Endpoint
     fastify.get('/debug', async (request, reply) => {
+        if (process.env.DEBUG !== 'true') {
+            return reply.code(403).send({
+                error: true,
+                message: 'Forbidden: Debug endpoint is disabled in production'
+            });
+        }
+
         try {
             const now = Date.now();
             const todayStart = new Date().setHours(0, 0, 0, 0);
