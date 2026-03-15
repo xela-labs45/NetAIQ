@@ -298,7 +298,9 @@ async function getWanStats() {
         const responseData = await getSiteHealth();
 
         // Step 1: Diagnostic Logging (Temporary)
-        console.log('=== UniFi Health RAW DATA:', JSON.stringify(responseData, null, 2));
+        if (process.env.DEBUG === 'true') {
+            console.log('=== UniFi Health RAW DATA:', JSON.stringify(responseData, null, 2));
+        }
 
         // Step 2: Defensive Parsing
         let healthArray = null;
@@ -324,7 +326,9 @@ async function getWanStats() {
                 s.subsystem === 'wan2' ||
                 s.subsystem === 'gw'
             );
-            console.log('=== All subsystems found:', healthArray.map(s => s.subsystem));
+            if (process.env.DEBUG === 'true') {
+                console.log('=== All subsystems found:', healthArray.map(s => s.subsystem));
+            }
         }
 
         // Step 4: Fallback to /stat/device if health parsing fails
@@ -338,7 +342,9 @@ async function getWanStats() {
                 );
 
                 if (gateway) {
-                    console.log('=== Gateway device found for fallback:', gateway.name || gateway.mac);
+                    if (process.env.DEBUG === 'true') {
+                        console.log('=== Gateway device found for fallback:', gateway.name || gateway.mac);
+                    }
                     const wanIp = gateway.wan1?.ip || gateway.config?.wan1?.ip || gateway.ip || null;
                     const txRate = gateway.uplink?.tx_bytes_r || 0;
                     const rxRate = gateway.uplink?.rx_bytes_r || 0;
@@ -359,7 +365,9 @@ async function getWanStats() {
             return { status: 'unknown', wan_ip: null, tx_mbps: '0.00', rx_mbps: '0.00' };
         }
 
-        console.log('=== WAN subsystem found:', JSON.stringify(wan));
+        if (process.env.DEBUG === 'true') {
+            console.log('=== WAN subsystem found:', JSON.stringify(wan));
+        }
 
         // Field names vary across UniFi OS versions
         const wanIp = wan.wan_ip || wan.gw_addr || wan.ip || wan['wan-ip'] || null;
