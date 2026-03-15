@@ -29,21 +29,18 @@ ENV PORT=3001
 
 WORKDIR /app
 
-# Create non-root user and prepare data directory
-RUN addgroup -g 1001 -S nodejs && \
-    adduser -S nodejs -u 1001 && \
-    mkdir -p /app/data && \
-    chown -R nodejs:nodejs /app
+# Ensure data directory exists and is owned by the node user (UID 1000)
+RUN mkdir -p /app/data && chown -R node:node /app
 
 # Copy package.json and only install production dependencies
-COPY --chown=nodejs:nodejs package*.json ./
+COPY --chown=node:node package*.json ./
 RUN npm install --omit=dev
 
 # Copy built files from the build stage
-COPY --from=build --chown=nodejs:nodejs /app/server ./server
+COPY --from=build --chown=node:node /app/server ./server
 
-# Switch to non-root user
-USER nodejs
+# Switch to the standard non-root user (UID 1000)
+USER node
 
 EXPOSE 3001
 
