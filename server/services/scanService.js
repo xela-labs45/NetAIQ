@@ -3,14 +3,15 @@ const { Netmask } = require('netmask');
 const pingService = require('./pingService');
 const db = require('../db/database');
 
-let isScanRunning = false;
-
 async function scanSegment(segmentId, fastify) {
-    if (isScanRunning) {
+    // Database-backed lock check
+    const lockCheck = db.prepare('SELECT value FROM settings WHERE key = ?').get('scan_running');
+    if (lockCheck?.value === '1') {
         throw new Error('A scan is already in progress.');
     }
 
-    isScanRunning = true;
+    // Atomic-like set
+    db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('scan_running', '1')").run();
 
     try {
         const segment = db.prepare('SELECT id, cidr FROM segments WHERE id = ?').get(segmentId);
@@ -78,7 +79,7 @@ async function scanSegment(segmentId, fastify) {
         return results;
 
     } finally {
-        isScanRunning = false;
+        db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('scan_running', '0')").run();
     }
 }
 
