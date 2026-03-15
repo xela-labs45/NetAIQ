@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useState } from 'react';
+import React, { createContext, useContext, useEffect, useState, useRef } from 'react';
 import { io } from 'socket.io-client';
 import { useAuth } from './useAuth';
 import { useQueryClient } from '@tanstack/react-query';
@@ -8,13 +8,28 @@ const SocketContext = createContext(null);
 export function SocketProvider({ children }) {
     const { user } = useAuth();
     const [socket, setSocket] = useState(null);
+    const socketRef = useRef(null);
     const queryClient = useQueryClient();
 
     useEffect(() => {
+        // Cleanup function to close any existing socket
+        const cleanup = () => {
+            if (socketRef.current) {
+                console.log('Closing socket:', socketRef.current.id);
+                socketRef.current.disconnect();
+                socketRef.current = null;
+            }
+        };
+
         if (user) {
+            cleanup(); // Ensure fresh start
+
             const newSocket = io(window.location.origin, {
-                withCredentials: true
+                withCredentials: true,
+                reconnectionAttempts: 5
             });
+
+            socketRef.current = newSocket;
 
             newSocket.on('connect', () => {
                 console.log('Socket connected:', newSocket.id);
@@ -47,14 +62,12 @@ export function SocketProvider({ children }) {
 
             setSocket(newSocket);
 
-            return () => {
-                newSocket.close();
-            };
-        } else if (socket) {
-            socket.close();
+            return cleanup;
+        } else {
+            cleanup();
             setSocket(null);
         }
-    }, [user]);
+    }, [user, queryClient]);
 
     return (
         <SocketContext.Provider value={socket}>
