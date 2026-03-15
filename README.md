@@ -17,11 +17,11 @@
 ## ✨ Features
 
 - 📡 **Real-time Device Monitoring** — ICMP ping checks with live status and interactive "Live Devices" modal (Wired/Wireless filtering)
-- 🏢 **Network Segments** — Organise devices by subnet (CIDR), with automated host discovery scanning
-- 📊 **Intelligent Bandwidth Monitoring** — Pulls clients, WAN stats, and usage reports from UniFi with MAC-to-hostname resolution
+- 🏢 **Network Segments** — Organise devices by subnet (CIDR), with automated host discovery scanning and strict validation
+- 📊 **UniFi Integration** — Full health oversight including WAN stats, Access Point status, and throughput monitoring
 - 🚨 **Bulk Device Management** — Register multiple discovered devices to tracking in a single click
 - 📧 **Automated Alerting** — Configurable email alerts (SMTP) for device events and high latency
-- 🔐 **Secure & Lightweight** — JWT authentication, SQLite storage, and boot-time configuration validation
+- 🔐 **Enhanced Security** — JWT authentication, login rate limiting, Zod input validation, and boot-time config checks
 
 ---
 
@@ -38,7 +38,8 @@
 | **Frontend** | React 18, Vite, Material UI (MUI), TanStack Query, Socket.IO Client |
 | **Backend** | Node.js 20, Fastify 4, Socket.IO |
 | **Database** | SQLite (`better-sqlite3`) |
-| **Auth** | JWT (`@fastify/jwt`), HTTP-only cookies |
+| **Auth** | JWT (`@fastify/jwt`), HTTP-only cookies, Rate Limiting |
+| **Validation** | `zod` (Strict schema-based input validation) |
 | **Monitoring** | `ping`, `node-cron`, `p-limit`, `netmask` |
 | **Notifications** | Nodemailer (SMTP) |
 | **Deployment** | Docker, Docker Compose |
@@ -123,20 +124,21 @@ All endpoints are prefixed with `/api/v1/` and require authentication (JWT cooki
 
 | Method | Endpoint | Description |
 |---|---|---|
-| `POST` | `/auth/login` | Log in and receive JWT cookie |
+| `POST` | `/auth/login` | Log in (Rate limited: 10 attempts / 15 min) |
 | `POST` | `/auth/logout` | Clear the JWT cookie |
 | `GET` | `/devices/online` | Get unique online devices with `?connection=` filter |
 | `POST` | `/devices/bulk` | Bulk register discovered devices |
 | `POST` | `/devices/:id/ping` | Trigger an immediate ping |
 | `GET` | `/devices/:id/history` | Get ping history |
 | `GET` | `/devices/:id/uptime` | Get uptime stats |
-| `GET/POST/PUT/DELETE` | `/segments` | Manage network segments |
-| `POST` | `/segments/:id/scan` | Start a subnet scan |
+| `GET/POST/PUT/DELETE` | `/segments` | Manage segments (Validated CIDR) |
+| `POST` | `/segments/:id/scan` | Start a subnet scan (Verified existence) |
 | `GET` | `/alerts` | List alerts |
 | `PUT` | `/alerts/:id/read` | Mark alert as read |
 | `PUT` | `/alerts/read-all` | Mark all alerts as read |
 | `GET` | `/unifi/clients` | Get UniFi clients |
-| `GET` | `/unifi/wan` | Get WAN stats |
+| `GET` | `/unifi/wan` | Get WAN throughput and status |
+| `GET` | `/unifi/wlan` | Get Access Point health and WiFi throughput |
 | `GET` | `/unifi/clients-usage` | Get Top Clients with hostname resolution |
 | `GET` | `/unifi/debug` | Inspect raw UniFi API responses |
 | `GET/PUT` | `/settings` | Read/update application settings |
