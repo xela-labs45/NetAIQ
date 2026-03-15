@@ -21,7 +21,7 @@
 - 📊 **UniFi Integration** — Full health oversight including WAN stats, Access Point status, and throughput monitoring
 - 🚨 **Bulk Device Management** — Register multiple discovered devices to tracking in a single click
 - 📧 **Automated Alerting** — Configurable email alerts (SMTP) for device events and high latency
-- 🔐 **Enhanced Security** — JWT authentication, login rate limiting, Zod input validation, and boot-time config checks
+- 🔐 **Hardened Security** — Unified JWT authentication (Socket.IO + API), login rate limiting, atomic scan locking, and hidden production stack traces
 
 ---
 
@@ -75,7 +75,14 @@ DB_PATH=./data/netmon.db
 
 ### 3. Build and run
 
+> [!IMPORTANT]
+> The container now runs as a non-root user (**node**, UID 1000). If you have an existing database, you **must** fix the host permissions for the `data/` directory.
+
 ```bash
+# Fix host permissions
+sudo chown -R $USER:$USER data/
+
+# Build and start
 sudo docker compose up -d --build
 ```
 
@@ -186,6 +193,20 @@ netmon-dashboard/
 ## 📄 License
 
 This project is licensed under the [MIT License](LICENSE).
+
+---
+
+## 🛠️ Troubleshooting
+
+### `SqliteError: attempt to write a readonly database`
+This occurs if the `data/netmon.db` file is owned by `root` (likely from a previous run). The container now runs as a non-privileged user (UID 1000).
+**Fix:** Run `sudo chown -R $USER:$USER data/` on your host machine to grant the correct permissions.
+
+### Socket connection failed (Unauthorized)
+Ensure your `JWT_SECRET` is consistent and that your browser is allowing third-party cookies if accessing the dashboard via a separate domain. The dashboard uses unified JWT verification for both API and real-time updates.
+
+### UniFi Sync not working
+Check the **Settings** page to ensure your Controller URL (e.g., `https://192.168.1.1`) and credentials are correct. Use the "Test Connection" button to verify.
 
 ---
 
