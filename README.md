@@ -93,15 +93,8 @@ By default, NetMon is configured to use **Caddy** as a reverse proxy to provide 
 
 ### 4. Build and run
 
-> [!IMPORTANT]
-> The container now runs as a non-root user (**node**, UID 1000). If you have an existing database, you **must** fix the host permissions for the `data/` directory.
-
 ```bash
-# Fix host permissions
-sudo chown -R $USER:$USER data/
-
-# Build and start
-sudo docker compose up -d --build
+docker compose up -d --build
 ```
 
 ### 4. Access the dashboard
@@ -223,14 +216,19 @@ This project is licensed under the [MIT License](LICENSE).
 ## 🛠️ Troubleshooting
 
 ### `SqliteError: attempt to write a readonly database`
-This occurs if the `data/netmon.db` file is owned by `root` (likely from a previous run). The container now runs as a non-privileged user (UID 1000).
-**Fix:** Run `sudo chown -R $USER:$USER data/` on your host machine to grant the correct permissions.
+This typically occurs if the `data/` directory or the `netmon.db` file has restricted permissions. The container runs as a non-privileged user (UID 1000).
 
-### Socket connection failed (Unauthorized)
-Ensure your `JWT_SECRET` is consistent and that your browser is allowing third-party cookies if accessing the dashboard via a separate domain. The dashboard uses unified JWT verification for both API and real-time updates.
+**Fix:** Run the following command on your host machine to ensure the application has the necessary permissions:
+```bash
+sudo chown -R $USER:$USER data/
+```
 
-### UniFi Sync not working
-Check the **Settings** page to ensure your Controller URL (e.g., `https://192.168.1.1`) and credentials are correct. Use the "Test Connection" button to verify.
+### Dashboard shows "Unauthorized" or Socket Errors
+Ensure your `JWT_SECRET` in `.env` is a long, random string. If you changed it while the app was running, you may need to clear your browser cookies and log in again.
+
+### UniFi Integration Issues
+- **Connection Failed:** Verify the Controller URL (use `https://`) and credentials. Use the **Test Connection** button in Settings.
+- **Data Not Appearing:** Check the logs (`docker compose logs -f netmon`) for specific API errors.
 
 ---
 
