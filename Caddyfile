@@ -1,0 +1,11 @@
+{$SITE_ADDRESS} {
+	# If the address is localhost or an IP, use internal SSL
+	@internal {
+		expression "`{$SITE_ADDRESS}` =~ /(localhost|^127\.|^10\.|^172\.(1[6-9]|2[0-9]|3[0-1])\.|^192\.168\.)/"
+	}
+	tls {
+		@internal internal
+	}
+
+	reverse_proxy netmon:3001
+}

@@ -1,9 +1,30 @@
 services:
   netmon:
     build: .
-    ports:
-      - "3001:3001"
+    expose:
+      - "${PORT:-3001}"
+    # ports:
+    #   - "3001:3001"
     volumes:
       - ./data:/app/data # persist SQLite DB
     env_file: .env
     restart: always
+
+  caddy:
+    image: caddy:latest
+    restart: always
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      - SITE_ADDRESS=${SITE_ADDRESS:-localhost}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - netmon
+
+volumes:
+  caddy_data:
+  caddy_config:

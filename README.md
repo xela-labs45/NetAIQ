@@ -71,9 +71,22 @@ PORT=3001
 NODE_ENV=production
 JWT_SECRET=your_strong_random_secret_here
 DB_PATH=./data/netmon.db
+
+# SITE_ADDRESS: Set to 'localhost' for local SSL, or your domain (e.g. netmon.example.com) for public SSL
+SITE_ADDRESS=localhost
 ```
 
-### 3. Build and run
+### 3. SSL Configuration (Caddy)
+
+By default, NetMon is configured to use **Caddy** as a reverse proxy to provide automatic SSL/HTTPS.
+
+- **For Local Use (HTTPS via Internal CA)**: Keep `SITE_ADDRESS=localhost` or set it to your server's local IP. Caddy will use a self-signed certificate.
+- **For Public Use (HTTPS via Let's Encrypt)**: Set `SITE_ADDRESS` to your registered domain name. Ensure ports 80 and 443 are open and pointing to your server.
+
+> [!TIP]
+> If you prefer to manage your own reverse proxy (Nginx, Traefik, etc.), you can disable Caddy in `docker-compose.yml` and uncomment the `ports` section for the `netmon` service.
+
+### 4. Build and run
 
 > [!IMPORTANT]
 > The container now runs as a non-root user (**node**, UID 1000). If you have an existing database, you **must** fix the host permissions for the `data/` directory.
@@ -88,7 +101,10 @@ sudo docker compose up -d --build
 
 ### 4. Access the dashboard
 
-Open your browser and navigate to: **[http://localhost:3001](http://localhost:3001)**
+Open your browser and navigate to: **[https://localhost](https://localhost)** (or your configured domain).
+
+> [!NOTE]
+> If using local-only SSL (`localhost`), your browser will show a certificate warning. You can safely proceed or trust the Caddy Root CA.
 
 **Default login credentials:**
 | Field | Value |
