@@ -1,15 +1,22 @@
 services:
   netmon:
     build: .
+    # EXPOSE: Internal port for Caddy proxy. Keep this if using the internal Caddy service.
     expose:
       - "${PORT:-3001}"
+
+    # PORTS: Uncomment the section below ONLY if you want to bypass Caddy and access the app directly 
+    # (e.g., if you have your own Nginx/Traefik reverse proxy on the host).
     # ports:
     #   - "3001:3001"
+
     volumes:
       - ./data:/app/data # persist SQLite DB
     env_file: .env
     restart: always
 
+  # CADDY: Provides automatic SSL/HTTPS. 
+  # Comment out or delete this entire section if you are managing SSL yourself.
   caddy:
     image: caddy:latest
     restart: always
