@@ -1,7 +1,10 @@
-:443 {
-	# Catch-all for any local address (localhost, IP, or hostname)
-	# Explicitly use internal TLS for all connections on this port.
-	tls internal
+{
+	# Trust Caddy's internal CA for everything
+	local_certs
+}
 
+# Wildcard HTTPS listener for any address on the mapped port
+:443 {
+	tls internal
 	reverse_proxy netmon:3001
 }
