@@ -6,4 +6,4 @@ services:
     volumes:
       - ./data:/app/data # persist SQLite DB
     env_file: .env
-    restart: unless-stopped
+    restart: always
