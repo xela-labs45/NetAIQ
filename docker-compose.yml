@@ -21,7 +21,7 @@ services:
     image: caddy:latest
     restart: always
     ports:
-      - "8080:80"
+      - "2080:80"
       - "8443:443"
     environment:
       - SITE_ADDRESS=${SITE_ADDRESS:-localhost}
