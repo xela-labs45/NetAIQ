@@ -1,6 +1,7 @@
-{$SITE_ADDRESS} {
-	# Caddy automatically uses its internal CA for 'localhost' and local IP addresses.
-	# For public domains, it will automatically use Let's Encrypt or ZeroSSL.
-	
+{$SITE_ADDRESS}, localhost, 127.0.0.1 {
+	# Explicitly use internal TLS for local addresses.
+	# Caddy will automatically generate and trust a self-signed cert for these.
+	tls internal
+
 	reverse_proxy netmon:3001
 }
