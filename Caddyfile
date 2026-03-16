@@ -2,14 +2,10 @@
 	debug
 }
 
-# Primary listener for the IP address
-{$SITE_ADDRESS} {
-	tls internal
-	reverse_proxy netmon:3001
-}
-
-# Secondary listeners for loopback
-localhost, 127.0.0.1 {
+# Use a single block to avoid the "ambiguous site" error.
+# This block will handle ANY request to the mapped port (3443).
+# We list the primary IP first to help Caddy match it.
+{$SITE_ADDRESS}, localhost, 127.0.0.1 {
 	tls internal
 	reverse_proxy netmon:3001
 }
