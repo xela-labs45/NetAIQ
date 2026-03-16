@@ -1,6 +1,6 @@
-{$SITE_ADDRESS}, localhost, 127.0.0.1 {
-	# Explicitly use internal TLS for local addresses.
-	# Caddy will automatically generate and trust a self-signed cert for these.
+:443 {
+	# Catch-all for any local address (localhost, IP, or hostname)
+	# Explicitly use internal TLS for all connections on this port.
 	tls internal
 
 	reverse_proxy netmon:3001
