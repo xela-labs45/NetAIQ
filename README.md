@@ -72,8 +72,10 @@ NODE_ENV=production
 JWT_SECRET=your_strong_random_secret_here
 DB_PATH=./data/netmon.db
 
-# SITE_ADDRESS: Set to 'localhost' for local SSL, or your domain (e.g. netmon.example.com) for public SSL
+# SSL / Proxy Settings
 SITE_ADDRESS=localhost
+HTTP_PORT=3080
+HTTPS_PORT=3443
 ```
 
 ### 3. SSL Configuration (Caddy)
