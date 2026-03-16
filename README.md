@@ -80,8 +80,11 @@ SITE_ADDRESS=localhost
 
 By default, NetMon is configured to use **Caddy** as a reverse proxy to provide automatic SSL/HTTPS.
 
-- **For Local Use (HTTPS via Internal CA)**: Keep `SITE_ADDRESS=localhost` or set it to your server's local IP. Caddy will use a self-signed certificate.
+- **For Local Use (HTTPS via Internal CA)**: Keep `SITE_ADDRESS=localhost` or set it to your server's local IP (e.g., `192.168.1.1`). Caddy will use a self-signed certificate.
 - **For Public Use (HTTPS via Let's Encrypt)**: Set `SITE_ADDRESS` to your registered domain name. Ensure ports 80 and 443 are open and pointing to your server.
+
+> [!TIP]
+> **Remote Local Access**: To access the dashboard from another machine on your network (e.g., `https://192.168.1.1:3443`), ensure `SITE_ADDRESS` in your `.env` is set to that local IP address, then restart with `docker compose down && docker compose up -d`.
 
 > [!TIP]
 > If you prefer to manage your own reverse proxy (Nginx, Traefik, etc.), you can disable Caddy in `docker-compose.yml` and uncomment the `ports` section for the `netmon` service.
