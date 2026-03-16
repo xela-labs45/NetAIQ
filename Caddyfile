@@ -1,10 +1,10 @@
 {
 	debug
+	# Force Caddy to use the IP certificate when the client doesn't send SNI
+	# (which often happens when connecting via IP address)
+	default_sni {$SITE_ADDRESS}
 }
 
-# Use a single block to avoid the "ambiguous site" error.
-# This block will handle ANY request to the mapped port (3443).
-# We list the primary IP first to help Caddy match it.
 {$SITE_ADDRESS}, localhost, 127.0.0.1 {
 	tls internal
 	reverse_proxy netmon:3001
