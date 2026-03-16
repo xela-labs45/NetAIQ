@@ -101,7 +101,7 @@ sudo docker compose up -d --build
 
 ### 4. Access the dashboard
 
-Open your browser and navigate to: **[https://localhost](https://localhost)** (or your configured domain).
+Open your browser and navigate to: **[https://localhost:8443](https://localhost:8443)** (or your configured domain).
 
 > [!NOTE]
 > If using local-only SSL (`localhost`), your browser will show a certificate warning. You can safely proceed or trust the Caddy Root CA.
