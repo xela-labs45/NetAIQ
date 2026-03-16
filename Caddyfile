@@ -1,10 +1,14 @@
 {
-	# Enable internal CA logic globally
-	local_certs
+	# Enable debug logs to see exact handshake failure if it persists
+	debug
 }
 
-# Explicitly listen on the server's IP, localhost, and 127.0.0.1
-192.168.1.6, localhost, 127.0.0.1 {
-	tls internal
+# Listen on the server IP, localhost, and loopback
+{$SITE_ADDRESS}, localhost, 127.0.0.1 {
+	# Caddy automatically uses internal SSL for these local addresses
 	reverse_proxy netmon:3001
+
+	log {
+		output file /data/caddy/access.log
+	}
 }
