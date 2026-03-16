@@ -1,10 +1,10 @@
 {
-	# Trust Caddy's internal CA for everything
+	# Enable internal CA logic globally
 	local_certs
 }
 
-# Wildcard HTTPS listener for any address on the mapped port
-:443 {
+# Explicitly listen on the server's IP, localhost, and 127.0.0.1
+192.168.1.6, localhost, 127.0.0.1 {
 	tls internal
 	reverse_proxy netmon:3001
 }
