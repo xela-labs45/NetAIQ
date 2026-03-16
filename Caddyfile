@@ -1,14 +1,15 @@
 {
-	# Enable debug logs to see exact handshake failure if it persists
 	debug
 }
 
-# Listen on the server IP, localhost, and loopback
-{$SITE_ADDRESS}, localhost, 127.0.0.1 {
-	# Caddy automatically uses internal SSL for these local addresses
+# Primary listener for the IP address
+{$SITE_ADDRESS} {
+	tls internal
 	reverse_proxy netmon:3001
+}
 
-	log {
-		output file /data/caddy/access.log
-	}
+# Secondary listeners for loopback
+localhost, 127.0.0.1 {
+	tls internal
+	reverse_proxy netmon:3001
 }
