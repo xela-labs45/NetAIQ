@@ -101,7 +101,10 @@ sudo docker compose up -d --build
 
 ### 4. Access the dashboard
 
-Open your browser and navigate to: **[https://localhost:8443](https://localhost:8443)** (or your configured domain).
+Open your browser and navigate to: **[https://localhost:3443](https://localhost:3443)** (or your configured domain/port).
+
+> [!TIP]
+> You can customize the ports (e.g., if 3443 is taken) by changing `HTTP_PORT` and `HTTPS_PORT` in your `.env` file.
 
 > [!NOTE]
 > If using local-only SSL (`localhost`), your browser will show a certificate warning. You can safely proceed or trust the Caddy Root CA.
