@@ -24,7 +24,7 @@ export function SocketProvider({ children }) {
         if (user) {
             cleanup(); // Ensure fresh start
 
-            const newSocket = io(window.location.origin, {
+            const newSocket = io({
                 withCredentials: true,
                 reconnectionAttempts: 5
             });

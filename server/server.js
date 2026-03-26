@@ -18,7 +18,7 @@ if (missing.length > 0) {
 
 // Register plugins
 fastify.register(cors, {
-  origin: process.env.NODE_ENV === 'production' ? false : 'http://localhost:5173',
+  origin: process.env.NODE_ENV === 'production' ? false : ['http://localhost:5173', 'https://localhost:5173'],
   credentials: true
 });
 
@@ -83,7 +83,7 @@ const start = async () => {
     // Setup Socket.IO
     const io = new Server(fastify.server, {
       cors: {
-        origin: process.env.NODE_ENV === 'production' ? false : 'http://localhost:5173',
+        origin: process.env.NODE_ENV === 'production' ? false : ['http://localhost:5173', 'https://localhost:5173'],
         methods: ["GET", "POST"],
         credentials: true
       }
