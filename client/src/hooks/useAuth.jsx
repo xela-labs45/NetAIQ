@@ -31,7 +31,12 @@ export function AuthProvider({ children }) {
         setUser(meRes.data.user);
 
         if (res.data.must_change_password) {
-            navigate('/settings');
+            navigate('/settings', {
+                state: {
+                    tab: 3,
+                    toast: 'Please set a new password — your account is still using the default credentials.'
+                }
+            });
         } else {
             navigate('/dashboard');
         }

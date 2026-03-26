@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useLocation } from 'react-router-dom';
 import {
     Box, Typography, Button, TextField, Grid, Card, Checkbox, Switch,
     FormControlLabel, Tabs, Tab, Alert, Snackbar, InputAdornment, IconButton,
@@ -32,6 +33,7 @@ function UnifiStatusChip({ status }) {
 export default function Settings() {
     const queryClient = useQueryClient();
     const { user } = useAuth();
+    const location = useLocation();
     const [tabIndex, setTabIndex] = useState(0);
     const [showPassword, setShowPassword] = useState(false);
     const [toast, setToast] = useState({ open: false, message: '', severity: 'info' });
@@ -55,6 +57,13 @@ export default function Settings() {
     const [passwordForm, setPasswordForm] = useState({
         current_password: '', new_password: '', confirm_password: ''
     });
+
+    // Open the correct tab and show a toast if the router passed navigation state
+    useEffect(() => {
+        if (location.state?.tab !== undefined) setTabIndex(location.state.tab);
+        if (location.state?.toast) showToast(location.state.toast, 'warning');
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
 
     // Fetch settings — use the returned data object directly (TanStack Query v5 removed onSuccess)
     const { data: settingsData } = useQuery({
