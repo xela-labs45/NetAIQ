@@ -8,7 +8,7 @@ import {
 import {
     Visibility, VisibilityOff, Save as SaveIcon, PlayArrow as TestIcon,
     CheckCircle as ConnectedIcon, Error as ErrorIcon, HelpOutline as UnknownIcon,
-    AutoAwesome as AiIcon, Refresh as RefreshIcon
+    AutoAwesome as AiIcon, Refresh as RefreshIcon, Storage as StorageIcon
 } from '@mui/icons-material';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import axios from 'axios';
@@ -60,7 +60,8 @@ export default function Settings() {
     });
 
     const [polling, setPolling] = useState({
-        ping_interval_ms: '60000', unifi_interval_ms: '300000', alert_cooldown_ms: '900000'
+        ping_interval_ms: '60000', unifi_interval_ms: '300000', alert_cooldown_ms: '900000',
+        ping_history_retention_days: '90', alert_cooldown_minutes: '15', alert_retention_days: '180'
     });
 
     const [ai, setAi] = useState({
@@ -90,6 +91,14 @@ export default function Settings() {
         queryKey: ['settings'],
         queryFn: () => axios.get('/api/v1/settings').then(res => res.data),
     });
+
+    // Fetch table row counts for data retention display
+    const { data: tableCounts } = useQuery({
+        queryKey: ['tableCounts'],
+        queryFn: () => axios.get('/api/v1/settings/table-counts').then(res => res.data),
+        staleTime: 60000,
+    });
+
 
     // Populate forms whenever settings data loads
     useEffect(() => {
@@ -123,6 +132,9 @@ export default function Settings() {
             ping_interval_ms: s.ping_interval_ms || '60000',
             unifi_interval_ms: s.unifi_interval_ms || '300000',
             alert_cooldown_ms: s.alert_cooldown_ms || '900000',
+            ping_history_retention_days: s.ping_history_retention_days || '90',
+            alert_cooldown_minutes: s.alert_cooldown_minutes || '15',
+            alert_retention_days: s.alert_retention_days || '180',
         });
 
         setAi({
@@ -593,7 +605,7 @@ export default function Settings() {
 
                 {/* POLLING TAB */}
                 <TabPanel value={tabIndex} index={3}>
-                    <Box sx={{ p: 4, maxWidth: 600 }}>
+                    <Box sx={{ p: 4, maxWidth: 700 }}>
                         <Typography variant="h6" gutterBottom>Background Jobs Configuration</Typography>
                         <Grid container spacing={4}>
                             <Grid item xs={12}>
@@ -617,18 +629,60 @@ export default function Settings() {
                                     <MenuItem value="900000">15 Minutes</MenuItem>
                                 </TextField>
                             </Grid>
-                            <Grid item xs={12}>
+                        </Grid>
+
+                        {/* DATA RETENTION SECTION */}
+                        <Box sx={{ mt: 5, mb: 2, display: 'flex', alignItems: 'center', gap: 1 }}>
+                            <StorageIcon color="primary" fontSize="small" />
+                            <Typography variant="h6">Data Retention</Typography>
+                        </Box>
+                        <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
+                            Configure how long historical data is kept. Cleanup runs automatically in the background. Unresolved critical alerts are never deleted.
+                        </Typography>
+                        <Grid container spacing={4}>
+                            <Grid item xs={12} sm={6}>
                                 <TextField
-                                    select fullWidth label="Alert Cooldown" helperText="Prevents spamming duplicate alerts if a device flaps up/down"
-                                    value={polling.alert_cooldown_ms} onChange={(e) => setPolling({ ...polling, alert_cooldown_ms: e.target.value })}
+                                    select fullWidth label="Ping History Retention"
+                                    value={polling.ping_history_retention_days}
+                                    onChange={(e) => setPolling({ ...polling, ping_history_retention_days: e.target.value })}
+                                    helperText={tableCounts ? `${tableCounts.ping_history?.toLocaleString()} rows stored` : 'Cleanup runs daily at 2:00 AM'}
                                 >
-                                    <MenuItem value="300000">5 Minutes</MenuItem>
-                                    <MenuItem value="900000">15 Minutes</MenuItem>
-                                    <MenuItem value="1800000">30 Minutes</MenuItem>
-                                    <MenuItem value="3600000">1 Hour</MenuItem>
+                                    <MenuItem value="30">30 Days</MenuItem>
+                                    <MenuItem value="60">60 Days</MenuItem>
+                                    <MenuItem value="90">90 Days</MenuItem>
+                                    <MenuItem value="180">180 Days</MenuItem>
+                                    <MenuItem value="365">1 Year</MenuItem>
+                                </TextField>
+                            </Grid>
+                            <Grid item xs={12} sm={6}>
+                                <TextField
+                                    select fullWidth label="Alert Deduplication Cooldown"
+                                    value={polling.alert_cooldown_minutes}
+                                    onChange={(e) => setPolling({ ...polling, alert_cooldown_minutes: e.target.value })}
+                                    helperText="Suppresses duplicate alerts (same device + type) within this window"
+                                >
+                                    <MenuItem value="5">5 Minutes</MenuItem>
+                                    <MenuItem value="10">10 Minutes</MenuItem>
+                                    <MenuItem value="15">15 Minutes</MenuItem>
+                                    <MenuItem value="30">30 Minutes</MenuItem>
+                                    <MenuItem value="60">1 Hour</MenuItem>
+                                </TextField>
+                            </Grid>
+                            <Grid item xs={12} sm={6}>
+                                <TextField
+                                    select fullWidth label="Alert History Retention"
+                                    value={polling.alert_retention_days}
+                                    onChange={(e) => setPolling({ ...polling, alert_retention_days: e.target.value })}
+                                    helperText={tableCounts ? `${tableCounts.alerts?.toLocaleString()} alerts stored` : 'Cleanup runs weekly Sunday at 3:00 AM'}
+                                >
+                                    <MenuItem value="30">30 Days</MenuItem>
+                                    <MenuItem value="90">90 Days</MenuItem>
+                                    <MenuItem value="180">180 Days</MenuItem>
+                                    <MenuItem value="365">1 Year</MenuItem>
                                 </TextField>
                             </Grid>
                         </Grid>
+
                         <Box sx={{ mt: 4 }}>
                             <Button variant="contained" startIcon={<SaveIcon />} onClick={() => savePolling.mutate(polling)} disabled={savePolling.isPending}>
                                 {savePolling.isPending ? 'Saving…' : 'Save and Restart Jobs'}

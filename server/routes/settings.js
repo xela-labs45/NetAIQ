@@ -37,6 +37,15 @@ module.exports = async function (fastify, opts) {
         reply.send({ settings: getSettingsMasked() });
     });
 
+    fastify.get('/table-counts', async (request, reply) => {
+        const pingCount = db.prepare('SELECT COUNT(*) as count FROM ping_history').get().count;
+        const alertCount = db.prepare('SELECT COUNT(*) as count FROM alerts').get().count;
+        const oldestPing = db.prepare('SELECT MIN(timestamp) as oldest FROM ping_history').get().oldest;
+        const oldestAlert = db.prepare('SELECT MIN(created_at) as oldest FROM alerts').get().oldest;
+        reply.send({ ping_history: pingCount, alerts: alertCount, oldest_ping: oldestPing, oldest_alert: oldestAlert });
+    });
+
+
     fastify.put('/unifi', async (request, reply) => {
         const body = { ...request.body };
         // Dont overwrite password if it's just dots

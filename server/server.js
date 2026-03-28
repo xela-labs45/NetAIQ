@@ -136,6 +136,10 @@ const start = async () => {
     const { startAiJobs } = require('./jobs/aiJob');
     startAiJobs(fastify);
 
+    const { startCleanupJobs } = require('./jobs/cleanupJob');
+    startCleanupJobs();
+
+
   } catch (err) {
     fastify.log.error(err);
     process.exit(1);

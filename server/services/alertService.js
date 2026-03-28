@@ -48,9 +48,16 @@ Time: ${new Date().toISOString()}
 }
 
 async function createAlert({ device_id, alert_type, message, severity, fastify }) {
-    // Check cooldown first
+    // Alert deduplication: skip if identical alert exists within cooldown window
     const settings = getSettings();
-    const cooldownMs = parseInt(settings.alert_cooldown_ms || '900000', 10);
+
+    // Prefer alert_cooldown_minutes (new), fall back to alert_cooldown_ms (legacy)
+    let cooldownMs;
+    if (settings.alert_cooldown_minutes) {
+        cooldownMs = parseInt(settings.alert_cooldown_minutes, 10) * 60 * 1000;
+    } else {
+        cooldownMs = parseInt(settings.alert_cooldown_ms || '900000', 10);
+    }
 
     const recentAlert = db.prepare(`
     SELECT id, created_at FROM alerts 
@@ -61,10 +68,11 @@ async function createAlert({ device_id, alert_type, message, severity, fastify }
     if (recentAlert) {
         const alertTime = new Date(recentAlert.created_at).getTime();
         if (Date.now() - alertTime < cooldownMs) {
-            console.log(`Alert suppressed due to cooldown: ${alert_type} for device ${device_id}`);
+            console.log(`Alert deduplicated (cooldown ${Math.round(cooldownMs / 60000)}min): ${alert_type} for device ${device_id}`);
             return;
         }
     }
+
 
     // Insert alert
     const stmt = db.prepare(`
