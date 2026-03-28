@@ -3,7 +3,7 @@ const {
   getAiStatus, testConnection, fetchModels, clearModelCache,
   identifyDevice, getUnidentifiedDevices, detectAnomalies, summariseAlerts
 } = require('../services/aiService');
-const { restartAiJobs, forceTriageRun } = require('../jobs/aiJob');
+const { restartAiJobs, forceTriageRun, runTriageJob } = require('../jobs/aiJob');
 
 module.exports = async function (fastify, opts) {
   fastify.addHook('preValidation', fastify.authenticate);
@@ -54,7 +54,9 @@ module.exports = async function (fastify, opts) {
       ORDER BY created_at DESC LIMIT 1
     `).get();
 
-    const isStale = !latest || Date.now() - new Date(latest?.created_at).getTime() > 5 * 60 * 1000;
+    // RULE: Anomalies are a 24h look-back; they don't change fast.
+    // We use a 60-minute stale window to avoid redundant expensive API calls on every page load.
+    const isStale = !latest || Date.now() - new Date(latest?.created_at).getTime() > 60 * 60 * 1000; // 60 mins
     const forceRefresh = request.query.refresh === 'true';
 
     if (isStale || forceRefresh) {
@@ -104,17 +106,26 @@ module.exports = async function (fastify, opts) {
       WHERE analysis_type = 'alert_triage'
       ORDER BY created_at DESC LIMIT 1
     `).get();
-
-    const isStale = !latest || Date.now() - new Date(latest?.created_at).getTime() > 2 * 60 * 1000;
+    // RULE: Alert Triage window is 15 minutes. Background jobs also run periodically.
+    // If the user simply opens the page, we only trigger a refresh IF it's older than 15m.
+    const isStale = !latest || Date.now() - new Date(latest?.created_at).getTime() > 15 * 60 * 1000; // 15 mins
     const forceRefresh = request.query.refresh === 'true';
 
     if (isStale || forceRefresh) {
-      // Run in background
+
+      // Run in background to avoid blocking the initial data return
       setImmediate(async () => {
         try {
-          await forceTriageRun(fastify);
+          if (forceRefresh) {
+            // RULE: Manual 'refresh' parameter via UI button bypasses delta checks.
+            await forceTriageRun(fastify);
+          } else {
+            // RULE: Auto-refresh on page-load MUST respect delta tracking (unread alert count).
+            // This prevents triggering the AI if the user just navigates back and forth.
+            await runTriageJob(fastify, false); // Respects delta tracking (unread count)
+          }
         } catch (err) {
-          // forceTriageRun handles its own error emission
+          // runTriageJob/forceTriageRun handle their own error emission
         }
       });
     }

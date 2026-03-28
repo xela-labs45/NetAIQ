@@ -56,40 +56,56 @@ function startAiJobs(fastify) {
 
   // Alert triage job — with delta tracking to skip unnecessary AI calls
   triageTimer = setInterval(async () => {
-    if (triageRunning) return;
-    const status = getAiStatus();
-    if (!status.available) return;
-    if (!shouldRun('ai_triage_schedule')) return;
+    await runTriageJob(fastify, false);
+  }, triageMins * 60 * 1000);
 
-    const currentUnread = getUnreadAlertCount();
 
-    // Skip if no unread alerts at all
-    if (currentUnread === 0) return;
+  console.log(`AI jobs started — anomaly: ${anomalyMins}min, triage: ${triageMins}min`);
+}
 
-    // Skip if unread count hasn't changed since last triage run
+/**
+ * Core triage logic shared between cron and on-demand routes
+ * @param {Object} fastify - Fastify instance
+ * @param {Boolean} forced - If true, bypasses delta tracking (unread alert count)
+ */
+async function runTriageJob(fastify, forced = false) {
+  if (triageRunning) return { skipped: true, reason: 'already_running' };
+
+  const status = getAiStatus();
+  if (!status.available) return { skipped: true, reason: 'ai_unavailable' };
+
+  // Background jobs also check schedule settings
+  if (!forced && !shouldRun('ai_triage_schedule')) return { skipped: true, reason: 'scheduled_off' };
+
+  const currentUnread = getUnreadAlertCount();
+
+  // If not forced, check if we actually need to run (Delta Tracking)
+  // RULE: Skip if no unread alerts exist, or if the unread count hasn't changed
+  // since the last time the AI successfully analysed them.
+  if (!forced) {
+    if (currentUnread === 0) return { skipped: true, reason: 'no_unread' };
     if (lastTriageUnreadCount !== null && currentUnread === lastTriageUnreadCount) {
       console.log(`[AI Triage] Skipped — No new alerts since last analysis (unread: ${currentUnread})`);
       fastify.io.emit('ai:analysis_current', { type: 'alert_triage', unread: currentUnread });
-      return;
+      return { skipped: true, reason: 'no_viewer_delta' };
     }
+  }
 
-    triageRunning = true;
-    try {
-      await summariseAlerts(true);
-      lastTriageUnreadCount = currentUnread;
-      fastify.io.emit('ai:analysis_complete', { type: 'alert_triage' });
-    } catch (err) {
-      console.error('Triage job error:', err.message);
-      fastify.io.emit('ai:analysis_error', {
-        type: 'alert_triage',
-        message: err.message
-      });
-    } finally {
-      triageRunning = false;
-    }
-  }, triageMins * 60 * 1000);
+  triageRunning = true;
+  try {
+    // RULE: summarisAlerts(true) performs the actual LLM call
+    await summariseAlerts(true);
+    lastTriageUnreadCount = currentUnread;
 
-  console.log(`AI jobs started — anomaly: ${anomalyMins}min, triage: ${triageMins}min`);
+    fastify.io.emit('ai:analysis_complete', { type: 'alert_triage' });
+    return { skipped: false };
+  } catch (err) {
+    console.error('Triage job error:', err.message);
+    fastify.io.emit('ai:analysis_error', { type: 'alert_triage', message: err.message });
+    throw err;
+  } finally {
+    triageRunning = false;
+  }
 }
 
 function restartAiJobs(fastify) {
@@ -99,28 +115,12 @@ function restartAiJobs(fastify) {
   console.log('AI jobs restarted with new intervals');
 }
 
+
 /**
- * Force a triage run (from the UI button). Bypasses delta tracking
- * so the AI always runs when explicitly requested.
+ * Force a triage run (from the UI button). Bypasses delta tracking.
  */
 async function forceTriageRun(fastify) {
-  if (triageRunning) return { skipped: true, reason: 'already_running' };
-  const status = getAiStatus();
-  if (!status.available) return { skipped: true, reason: 'ai_unavailable' };
-
-  triageRunning = true;
-  try {
-    await summariseAlerts(true);
-    lastTriageUnreadCount = getUnreadAlertCount();
-    fastify.io.emit('ai:analysis_complete', { type: 'alert_triage' });
-    return { skipped: false };
-  } catch (err) {
-    console.error('Forced triage error:', err.message);
-    fastify.io.emit('ai:analysis_error', { type: 'alert_triage', message: err.message });
-    throw err;
-  } finally {
-    triageRunning = false;
-  }
+  return await runTriageJob(fastify, true);
 }
 
-module.exports = { startAiJobs, restartAiJobs, forceTriageRun };
+module.exports = { startAiJobs, restartAiJobs, forceTriageRun, runTriageJob };
