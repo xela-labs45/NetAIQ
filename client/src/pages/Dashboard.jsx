@@ -66,7 +66,7 @@ export default function Dashboard() {
 
     const { data: discoveryStats } = useQuery({
         queryKey: ['discovery', 'stats'],
-        queryFn: () => axios.get('/api/v1/discovery/stats').then(res => res.data),
+        queryFn: () => axios.get('/api/v1/discovery/discovered/stats').then(res => res.data),
         refetchInterval: 30000
     });
 

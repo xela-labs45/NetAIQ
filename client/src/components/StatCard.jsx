@@ -33,7 +33,24 @@ export default function StatCard({ title, value, color, icon, urgent, subtitle, 
           <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>{subtitle}</Typography>
         )}
         {extraAction && (
-          <Box sx={{ mt: 1, position: 'relative', zIndex: 2 }}>{extraAction}</Box>
+          <Box
+            component="a"
+            onClick={(e) => { e.stopPropagation(); extraAction.onClick(); }}
+            sx={{
+              mt: 1,
+              display: 'block',
+              fontSize: '0.7rem',
+              color: color,
+              textDecoration: 'none',
+              fontWeight: 'bold',
+              '&:hover': { textDecoration: 'underline' },
+              cursor: 'pointer',
+              zIndex: 2,
+              position: 'relative'
+            }}
+          >
+            {extraAction.label}
+          </Box>
         )}
       </Box>
       <Box sx={{

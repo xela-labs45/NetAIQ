@@ -68,6 +68,12 @@ export default function LiveDevicesModal({ open, onClose, defaultTab = 'all' }) 
         setAddDialogOpen(true);
     };
 
+    const handleBulkRegister = () => {
+        const toRegister = onlineDevices.filter(d => !d.is_registered);
+        if (toRegister.length === 0) return;
+        bulkMutation.mutate({ devices: toRegister });
+    };
+
     const { data: segmentsData } = useQuery({
         queryKey: ['segments'],
         queryFn: () => axios.get('/api/v1/segments').then(res => res.data),
