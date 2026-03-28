@@ -6,7 +6,8 @@ import {
 } from '@mui/material';
 import {
   Add as AddIcon, ExpandMore as ExpandMoreIcon,
-  WifiTethering as ScanIcon, Delete as DeleteIcon
+  WifiTethering as ScanIcon, Delete as DeleteIcon,
+  Fingerprint as ArpIcon, TravelExplore as ExploreIcon
 } from '@mui/icons-material';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import axios from 'axios';
@@ -20,6 +21,10 @@ export default function Segments() {
   const [scanProgress, setScanProgress] = useState({}); // { [segmentId]: { scanned, total, status, current_ip } }
   const [expandedScans, setExpandedScans] = useState({});
   const [localScans, setLocalScans] = useState({});
+
+  // ARP Discovery state
+  const [arpProgress, setArpProgress] = useState({}); // { [segmentId]: { pinged, total, resultText } }
+  const [isArpScanningAll, setIsArpScanningAll] = useState(false);
 
   useEffect(() => {
     if (socket) {
@@ -45,12 +50,49 @@ export default function Segments() {
         }
       };
 
+      const handleArpStarted = (data) => {
+        setArpProgress(prev => ({
+          ...prev,
+          [data.segment_id]: { pinged: 0, total: data.total_ips, status: 'running' }
+        }));
+      };
+
+      const handleArpProgress = (data) => {
+        setArpProgress(prev => ({
+          ...prev,
+          [data.segment_id]: { pinged: data.pinged, total: data.total, status: 'running' }
+        }));
+      };
+
+      const handleArpComplete = (data) => {
+        setArpProgress(prev => ({
+          ...prev,
+          [data.segment_id]: { ...prev[data.segment_id], status: 'complete', resultText: `${data.macs_found} devices discovered` }
+        }));
+        // Auto-clear after 10s
+        setTimeout(() => {
+          setArpProgress(prev => {
+            const newState = { ...prev };
+            delete newState[data.segment_id];
+            // If scanning all and all are done, reset master flag
+            if (Object.keys(newState).length === 0) setIsArpScanningAll(false);
+            return newState;
+          });
+        }, 10000);
+      };
+
       socket.on('scan:progress', handleProgress);
       socket.on('scan:complete', handleComplete);
+      socket.on('discovery:arp_started', handleArpStarted);
+      socket.on('discovery:arp_progress', handleArpProgress);
+      socket.on('discovery:arp_complete', handleArpComplete);
 
       return () => {
         socket.off('scan:progress', handleProgress);
         socket.off('scan:complete', handleComplete);
+        socket.off('discovery:arp_started', handleArpStarted);
+        socket.off('discovery:arp_progress', handleArpProgress);
+        socket.off('discovery:arp_complete', handleArpComplete);
       };
     }
   }, [socket, queryClient]);
@@ -80,6 +122,24 @@ export default function Segments() {
       await axios.post(`/api/v1/segments/${id}/scan`);
     } catch (err) {
       alert(err.response?.data?.message || 'Failed to start scan');
+    }
+  };
+
+  const handleArpScan = async (id) => {
+    try {
+      await axios.post(`/api/v1/discovery/arp-scan/${id}`);
+    } catch (err) {
+      alert(err.response?.data?.message || 'Failed to start ARP discovery');
+    }
+  };
+
+  const handleArpScanAll = async () => {
+    try {
+      setIsArpScanningAll(true);
+      await axios.post('/api/v1/discovery/arp-scan/all');
+    } catch (err) {
+      setIsArpScanningAll(false);
+      alert(err.response?.data?.message || 'Failed to start full ARP discovery');
     }
   };
 
@@ -117,9 +177,20 @@ export default function Segments() {
     <Box>
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
         <Typography variant="h4" fontWeight="bold">Network Segments</Typography>
-        <Button variant="contained" startIcon={<AddIcon />} onClick={handleOpenAdd}>
-          Add Segment
-        </Button>
+        <Box sx={{ display: 'flex', gap: 2 }}>
+          <Button
+            variant="outlined"
+            color="secondary"
+            startIcon={<ExploreIcon />}
+            onClick={handleArpScanAll}
+            disabled={isArpScanningAll || Object.values(arpProgress).some(p => p.status === 'running')}
+          >
+            Discover All Segments
+          </Button>
+          <Button variant="contained" startIcon={<AddIcon />} onClick={handleOpenAdd}>
+            Add Segment
+          </Button>
+        </Box>
       </Box>
 
       {isLoading ? (
@@ -173,7 +244,25 @@ export default function Segments() {
                   </Box>
                 )}
 
-                <Box sx={{ display: 'flex', gap: 1, mb: 2 }}>
+                {arpProgress[seg.id] && (
+                  <Box sx={{ mb: 2, p: 1, bgcolor: 'rgba(156, 39, 176, 0.05)', borderRadius: 1, border: '1px solid rgba(156, 39, 176, 0.2)' }}>
+                    <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.5 }}>
+                      <Typography variant="caption" color="secondary">
+                        {arpProgress[seg.id].status === 'running' ? 'ARP Discovery...' : arpProgress[seg.id].resultText}
+                      </Typography>
+                      {arpProgress[seg.id].status === 'running' && (
+                        <Typography variant="caption" color="secondary">{arpProgress[seg.id].pinged} / {arpProgress[seg.id].total} IPs</Typography>
+                      )}
+                    </Box>
+                    <LinearProgress
+                      color="secondary"
+                      variant={arpProgress[seg.id].status === 'running' ? 'determinate' : 'determinate'}
+                      value={arpProgress[seg.id].status === 'running' ? (arpProgress[seg.id].pinged / arpProgress[seg.id].total) * 100 : 100}
+                    />
+                  </Box>
+                )}
+
+                <Box sx={{ display: 'flex', gap: 1, mb: 1 }}>
                   <Button
                     variant="outlined"
                     fullWidth
@@ -183,7 +272,20 @@ export default function Segments() {
                   >
                     {scanProgress[seg.id] ? 'Scanning...' : 'Scan Now'}
                   </Button>
+                  <Button
+                    variant="outlined"
+                    color="secondary"
+                    fullWidth
+                    startIcon={<ArpIcon />}
+                    disabled={!!arpProgress[seg.id] && arpProgress[seg.id]?.status === 'running'}
+                    onClick={() => handleArpScan(seg.id)}
+                  >
+                    {arpProgress[seg.id]?.status === 'running' ? 'Discovering...' : 'Discover MACs'}
+                  </Button>
                 </Box>
+                <Typography variant="caption" color="warning.main" sx={{ display: 'block', mb: 2, textAlign: 'center', fontSize: '0.65rem' }}>
+                  ARP scan sends traffic to all IPs. Use manually — not for scheduling.
+                </Typography>
 
                 <Accordion expanded={!!expandedScans[seg.id]} onChange={() => toggleScans(seg.id)} sx={{ bgcolor: 'rgba(255,255,255,0.03)', boxShadow: 'none' }}>
                   <AccordionSummary expandIcon={<ExpandMoreIcon />}>

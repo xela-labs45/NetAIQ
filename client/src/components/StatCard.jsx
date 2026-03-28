@@ -1,7 +1,7 @@
 import React from 'react';
 import { Box, Card, Typography } from '@mui/material';
 
-export default function StatCard({ title, value, color, icon, urgent, subtitle, onClick, hoverColor }) {
+export default function StatCard({ title, value, color, icon, urgent, subtitle, onClick, hoverColor, extraAction }) {
   return (
     <Card
       onClick={onClick}
@@ -22,7 +22,7 @@ export default function StatCard({ title, value, color, icon, urgent, subtitle, 
         } : {}
       }}
     >
-      <Box>
+      <Box sx={{ zIndex: 1 }}>
         <Typography color="text.secondary" variant="overline" display="block" gutterBottom>
           {title}
         </Typography>
@@ -30,7 +30,10 @@ export default function StatCard({ title, value, color, icon, urgent, subtitle, 
           {value}
         </Typography>
         {subtitle && (
-          <Typography variant="caption" color="text.secondary">{subtitle}</Typography>
+          <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>{subtitle}</Typography>
+        )}
+        {extraAction && (
+          <Box sx={{ mt: 1, position: 'relative', zIndex: 2 }}>{extraAction}</Box>
         )}
       </Box>
       <Box sx={{

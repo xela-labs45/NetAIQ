@@ -65,6 +65,8 @@ fastify.register(require('./routes/alerts'), { prefix: '/api/v1/alerts' });
 fastify.register(require('./routes/unifi'), { prefix: '/api/v1/unifi' });
 fastify.register(require('./routes/settings'), { prefix: '/api/v1/settings' });
 fastify.register(require('./routes/ai'), { prefix: '/api/v1/ai' });
+fastify.register(require('./routes/discovery'), { prefix: '/api/v1/discovery' });
+
 
 // Fallback for React Router in production
 fastify.setNotFoundHandler((request, reply) => {

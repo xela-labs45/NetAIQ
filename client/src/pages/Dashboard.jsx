@@ -64,6 +64,12 @@ export default function Dashboard() {
         refetchInterval: 10000
     });
 
+    const { data: discoveryStats } = useQuery({
+        queryKey: ['discovery', 'stats'],
+        queryFn: () => axios.get('/api/v1/discovery/stats').then(res => res.data),
+        refetchInterval: 30000
+    });
+
     const { data: segmentsData } = useQuery({
         queryKey: ['segments'],
         queryFn: () => axios.get('/api/v1/segments').then(res => res.data),
@@ -104,6 +110,9 @@ export default function Dashboard() {
     const totalOnline = counts?.total || 0;
     const wiredCount = counts?.wired || 0;
     const wirelessCount = counts?.wireless || 0;
+
+    const discoveredWired = discoveryStats?.wired || 0;
+    const discoveredWireless = discoveryStats?.wireless || 0;
 
     const criticalDevices = devices.filter(d => d.is_critical === 1);
     const criticalTotal = criticalDevices.length;
@@ -196,6 +205,16 @@ export default function Dashboard() {
                         icon={<EthernetIcon />}
                         onClick={() => handleOpenLiveModal('wired')}
                         hoverColor="rgba(34, 197, 94, 0.5)"
+                        extraAction={
+                            <Link
+                                component="button"
+                                variant="caption"
+                                sx={{ color: 'text.secondary', '&:hover': { color: 'primary.main' }, textDecoration: 'none' }}
+                                onClick={(e) => { e.stopPropagation(); handleOpenLiveModal('discovered_wired'); }}
+                            >
+                                View all {discoveredWired} ever seen →
+                            </Link>
+                        }
                     />
                 </Grid>
                 <Grid item xs={12} sm={6} md={3}>
@@ -207,6 +226,16 @@ export default function Dashboard() {
                         icon={<WifiIcon />}
                         onClick={() => handleOpenLiveModal('wireless')}
                         hoverColor="rgba(6, 182, 212, 0.5)"
+                        extraAction={
+                            <Link
+                                component="button"
+                                variant="caption"
+                                sx={{ color: 'text.secondary', '&:hover': { color: 'primary.main' }, textDecoration: 'none' }}
+                                onClick={(e) => { e.stopPropagation(); handleOpenLiveModal('discovered_wireless'); }}
+                            >
+                                View all {discoveredWireless} ever seen →
+                            </Link>
+                        }
                     />
                 </Grid>
                 <Grid item xs={12} sm={6} md={3}>

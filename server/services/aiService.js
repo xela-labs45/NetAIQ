@@ -459,9 +459,20 @@ Return this exact JSON:
   return parsed;
 }
 
+function normaliseMac(mac) {
+  if (!mac) return null;
+  const clean = mac.replace(/[^a-fA-F0-9]/g, '');
+  if (clean.length !== 12) return null;
+  return clean.toLowerCase().match(/.{2}/g).join(':');
+}
+
 function saveIdentification(deviceId, mac, result, raw, provider, model) {
   const transaction = db.transaction(() => {
-    db.prepare(`DELETE FROM ai_device_identifications WHERE device_id = ? `).run(deviceId);
+    if (deviceId !== null) {
+      db.prepare(`DELETE FROM ai_device_identifications WHERE device_id = ? `).run(deviceId);
+    } else {
+      db.prepare(`DELETE FROM ai_device_identifications WHERE mac_address = ? AND device_id IS NULL`).run(mac);
+    }
 
     db.prepare(`
       INSERT INTO ai_device_identifications
@@ -474,8 +485,107 @@ function saveIdentification(deviceId, mac, result, raw, provider, model) {
       result.owner_type, result.confidence, result.reasoning,
       result.suggested_name, raw, provider, model
     );
+
+    // Flag it in discovered_devices registry
+    if (mac) {
+      const cleanMac = normaliseMac(mac);
+      if (cleanMac) {
+        db.prepare('UPDATE discovered_devices SET ai_identified = 1 WHERE mac_address = ?').run(cleanMac);
+      }
+    }
   });
   transaction();
+}
+
+async function identifyDiscoveredDevice(mac) {
+  const cleanMac = normaliseMac(mac);
+  if (!cleanMac) return null;
+
+  // First check if already in devices table
+  const registered = db.prepare('SELECT id FROM devices WHERE mac_address = ?').get(cleanMac);
+  if (registered) {
+    // Use existing flow
+    return await identifyDevice(registered.id);
+  }
+
+  // Not registered — build context from discovered_devices directly
+  const discovered = db.prepare(`
+    SELECT dd.*, s.name as segment_name
+    FROM discovered_devices dd
+    LEFT JOIN segments s ON s.id = dd.segment_id
+    WHERE dd.mac_address = ?
+  `).get(cleanMac);
+
+  if (!discovered) return null;
+
+  // OUI lookup first
+  const ouiResult = lookupMac(cleanMac);
+  if (ouiResult && ouiResult.confidence === 'high') {
+    const result = {
+      device_type_suggestion: ouiResult.device_type,
+      manufacturer: ouiResult.manufacturer,
+      os_guess: ouiResult.os_guess,
+      owner_type: 'unknown',
+      confidence: 'high',
+      reasoning: `Identified via MAC OUI prefix. Manufacturer: ${ouiResult.manufacturer}.` + (ouiResult.note ? ` ${ouiResult.note}` : ''),
+      suggested_name: discovered.hostname || `${ouiResult.manufacturer} - Device`,
+      provider: 'oui_lookup',
+      model: 'mac_oui'
+    };
+    saveIdentification(null, cleanMac, result, null, 'oui_lookup', 'mac_oui');
+    return result;
+  }
+
+  // AI identification
+  const globalRate = checkRateLimit('identify_device_global', 20, 60000);
+  if (!globalRate.allowed) {
+    return { error: true, rateLimited: true, resetIn: globalRate.resetIn, message: 'Global identification rate limit reached' };
+  }
+
+  const context = {
+    mac: discovered.mac_address,
+    ip: discovered.last_ip,
+    hostname: discovered.hostname,
+    is_wired: discovered.is_wired,
+    segment: discovered.segment_name,
+    vendor: discovered.vendor,
+    oui_hint: ouiResult
+  };
+
+  const systemPrompt = "You are a network device identification expert. Analyse MAC addresses, OUI prefixes, hostnames, and network context to identify device type and manufacturer. Always return valid JSON only. No markdown, no explanation outside JSON.";
+  const userPrompt = `Identify this network device.
+Device data: ${JSON.stringify(context)}
+
+Valid device_type values (use exactly one):
+router, switch, ap, server, workstation, windows_laptop, mac, iphone_ipad, android, voip_phone, printer, other
+
+Return this exact JSON:
+{
+  "device_type_suggestion": string,
+  "manufacturer": string,
+  "os_guess": string or null,
+  "owner_type": "staff" | "guest" | "infrastructure" | "unknown",
+  "confidence": "high" | "medium" | "low",
+  "reasoning": string,
+  "suggested_name": string
+}`;
+
+  const raw = await safeCallAI(systemPrompt, userPrompt, 400);
+  if (!raw) return null;
+
+  const parsed = safeJsonParse(raw) || {
+    device_type_suggestion: 'other',
+    manufacturer: discovered.vendor || 'Unknown',
+    os_guess: null,
+    owner_type: 'unknown',
+    confidence: 'low',
+    reasoning: raw?.slice(0, 300) || 'AI did not return valid JSON',
+    suggested_name: discovered.hostname || discovered.last_ip
+  };
+
+  const status = getAiStatus();
+  saveIdentification(null, cleanMac, parsed, raw, status.provider, status.model);
+  return parsed;
 }
 
 function getUnidentifiedDevices() {
@@ -671,6 +781,6 @@ Return this exact JSON:
 
 module.exports = {
   getAiStatus, testConnection, fetchModels, clearModelCache,
-  identifyDevice, getUnidentifiedDevices, detectAnomalies,
+  identifyDevice, identifyDiscoveredDevice, getUnidentifiedDevices, detectAnomalies,
   summariseAlerts, checkRateLimit
 };

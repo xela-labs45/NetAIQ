@@ -30,6 +30,25 @@ CREATE TABLE IF NOT EXISTS devices (
 CREATE INDEX IF NOT EXISTS idx_devices_ip ON devices(ip_address);
 CREATE INDEX IF NOT EXISTS idx_devices_mac ON devices(mac_address);
 
+CREATE TABLE IF NOT EXISTS discovered_devices (
+  id INTEGER PRIMARY KEY,
+  mac_address TEXT UNIQUE NOT NULL,
+  last_ip TEXT,
+  hostname TEXT,
+  is_wired INTEGER,
+  source TEXT,
+  segment_id INTEGER REFERENCES segments(id) ON DELETE SET NULL,
+  vendor TEXT,
+  first_seen TEXT DEFAULT CURRENT_TIMESTAMP,
+  last_seen TEXT DEFAULT CURRENT_TIMESTAMP,
+  ai_identified INTEGER DEFAULT 0
+);
+
+CREATE INDEX IF NOT EXISTS idx_dd_mac ON discovered_devices(mac_address);
+CREATE INDEX IF NOT EXISTS idx_dd_ip ON discovered_devices(last_ip);
+CREATE INDEX IF NOT EXISTS idx_dd_segment ON discovered_devices(segment_id);
+
+
 CREATE TABLE IF NOT EXISTS ping_history (
   id INTEGER PRIMARY KEY,
   device_id INTEGER REFERENCES devices(id) ON DELETE CASCADE,

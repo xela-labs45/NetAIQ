@@ -2,6 +2,7 @@ const cron = require('node-cron');
 const db = require('../db/database');
 const unifiService = require('../services/unifiService');
 const alertService = require('../services/alertService');
+const { harvestUnifiWifi } = require('../services/discoveryService');
 
 let currentTask = null;
 let previousDisconnected = 0;
@@ -34,6 +35,11 @@ module.exports = function (fastify) {
         try {
             // Background fetching to keep cache warm
             await unifiService.getClients();
+
+            // Auto-harvest WiFi devices to the permanent registry
+            const harvested = await harvestUnifiWifi();
+            fastify.log.info(`Discovery: harvested ${Math.max(0, harvested?.harvested || 0)} WiFi devices from UniFi`);
+
             await unifiService.getDevices();
             await unifiService.getSiteHealth();
             const wlan = await unifiService.getWlanHealth();

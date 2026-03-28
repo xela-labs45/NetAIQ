@@ -1,7 +1,7 @@
 const db = require('../db/database');
 const {
   getAiStatus, testConnection, fetchModels, clearModelCache,
-  identifyDevice, getUnidentifiedDevices, detectAnomalies, summariseAlerts
+  identifyDevice, identifyDiscoveredDevice, getUnidentifiedDevices, detectAnomalies, summariseAlerts
 } = require('../services/aiService');
 const { restartAiJobs, forceTriageRun, runTriageJob } = require('../jobs/aiJob');
 
@@ -163,6 +163,19 @@ module.exports = async function (fastify, opts) {
     if (!device_id) return reply.code(400).send({ error: 'device_id required' });
 
     const result = await identifyDevice(device_id);
+
+    if (result && result.error && result.rateLimited) {
+      return reply.code(429).send({ error: 'Rate limited', resetIn: result.resetIn });
+    }
+
+    return result || reply.code(500).send({ error: 'Identification failed' });
+  });
+
+  fastify.post('/identify-mac', async (request, reply) => {
+    const { mac_address } = request.body;
+    if (!mac_address) return reply.code(400).send({ error: 'mac_address required' });
+
+    const result = await identifyDiscoveredDevice(mac_address);
 
     if (result && result.error && result.rateLimited) {
       return reply.code(429).send({ error: 'Rate limited', resetIn: result.resetIn });
