@@ -9,8 +9,9 @@ import {
   Add as AddIcon, Edit as EditIcon, Delete as DeleteIcon,
   Speed as PingIcon, Refresh as RefreshIcon,
   SettingsEthernet as EthernetIcon, Wifi as WifiIcon,
-  HelpOutline as UnknownIcon
+  HelpOutline as UnknownIcon, AutoAwesome as AutoAwesomeIcon
 } from '@mui/icons-material';
+
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import axios from 'axios';
 import { LineChart, Line, XAxis, YAxis, Tooltip as RechartsTooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
@@ -419,26 +420,62 @@ export default function Devices() {
             <Grid container spacing={2} sx={{ mb: 4 }}>
               <Grid item xs={6}>
                 <Typography variant="caption" color="text.secondary">Hostname</Typography>
-                <Typography variant="body1">{selectedDevice.hostname || 'N/A'}</Typography>
+                <Typography variant="body1" sx={{ fontWeight: 'medium' }}>{selectedDevice.hostname || 'N/A'}</Typography>
               </Grid>
               <Grid item xs={6}>
                 <Typography variant="caption" color="text.secondary">IP Address</Typography>
-                <Typography variant="body1">{selectedDevice.ip_address}</Typography>
+                <Typography variant="body1" sx={{ fontWeight: 'medium' }}>{selectedDevice.ip_address}</Typography>
               </Grid>
               <Grid item xs={6}>
                 <Typography variant="caption" color="text.secondary">MAC Address</Typography>
-                <Typography variant="body1">{selectedDevice.mac_address || 'N/A'}</Typography>
+                <Typography variant="body1" sx={{ fontWeight: 'medium', fontFamily: 'monospace' }}>{selectedDevice.mac_address || 'N/A'}</Typography>
               </Grid>
               <Grid item xs={6}>
                 <Typography variant="caption" color="text.secondary">Type</Typography>
                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                   {React.createElement(getDeviceTypeIcon(selectedDevice.device_type), { fontSize: 'small', color: 'action' })}
-                  <Typography variant="body1">
+                  <Typography variant="body1" sx={{ fontWeight: 'medium' }}>
                     {DEVICE_TYPES.find(t => t.value === selectedDevice.device_type)?.label || selectedDevice.device_type}
                   </Typography>
                 </Box>
               </Grid>
             </Grid>
+
+            {/* AI Identification Section (NEW) */}
+            {selectedDevice.ai_manufacturer && (
+              <Box sx={{ mb: 4, p: 2, borderRadius: 2, bgcolor: 'rgba(37, 99, 235, 0.05)', border: '1px solid rgba(37, 99, 235, 0.1)' }}>
+                <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 2 }}>
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                    <Box sx={{ color: 'primary.main', display: 'flex' }}><AutoAwesomeIcon fontSize="small" /></Box>
+                    <Typography variant="subtitle2" sx={{ fontWeight: 'bold', color: 'primary.main', letterSpacing: 0.5 }}>AI IDENTIFICATION</Typography>
+                  </Box>
+                  <Chip
+                    label={`${selectedDevice.ai_confidence?.toUpperCase()} CONFIDENCE`}
+                    size="small"
+                    variant="outlined"
+                    color={selectedDevice.ai_confidence === 'high' ? 'success' : selectedDevice.ai_confidence === 'medium' ? 'warning' : 'default'}
+                    sx={{ fontSize: '0.65rem', height: 20, fontWeight: 'bold' }}
+                  />
+                </Box>
+                <Grid container spacing={2}>
+                  <Grid item xs={6}>
+                    <Typography variant="caption" color="text.secondary">Suggested Manufacturer</Typography>
+                    <Typography variant="body2" sx={{ fontWeight: 'bold' }}>{selectedDevice.ai_manufacturer}</Typography>
+                  </Grid>
+                  <Grid item xs={6}>
+                    <Typography variant="caption" color="text.secondary">OS Guess</Typography>
+                    <Typography variant="body2" sx={{ fontWeight: 'bold' }}>{selectedDevice.ai_os || 'Unknown'}</Typography>
+                  </Grid>
+                  <Grid item xs={12}>
+                    <Typography variant="caption" color="text.secondary">AI Reasoning</Typography>
+                    <Typography variant="body2" sx={{ fontStyle: 'italic', color: 'text.secondary', mt: 0.5 }}>
+                      "{selectedDevice.ai_reasoning}"
+                    </Typography>
+                  </Grid>
+                </Grid>
+              </Box>
+            )}
+
 
             {deviceUptime && (
               <Grid container spacing={2} sx={{ mb: 4 }}>

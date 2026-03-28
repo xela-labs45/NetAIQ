@@ -42,12 +42,21 @@ module.exports = async function (fastify, opts) {
         const devices = db.prepare(`
       SELECT d.*, 
              s.name as segment_name, s.color as segment_color,
+             ai.manufacturer as ai_manufacturer,
+             ai.device_type_suggestion as ai_device_type,
+             ai.os_guess as ai_os,
+             ai.confidence as ai_confidence,
+             ai.reasoning as ai_reasoning,
+             ai.suggested_name as ai_suggested_name,
              (SELECT status FROM ping_history ph WHERE ph.device_id = d.id ORDER BY timestamp DESC LIMIT 1) as status,
              (SELECT latency_ms FROM ping_history ph WHERE ph.device_id = d.id ORDER BY timestamp DESC LIMIT 1) as latency_ms,
              (SELECT timestamp FROM ping_history ph WHERE ph.device_id = d.id ORDER BY timestamp DESC LIMIT 1) as last_seen
       FROM devices d
+
       LEFT JOIN segments s ON d.segment_id = s.id
+      LEFT JOIN ai_device_identifications ai ON d.id = ai.device_id
     `).all();
+
 
         reply.send({ devices });
     });
