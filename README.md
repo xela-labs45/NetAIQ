@@ -16,12 +16,13 @@
 
 ## ✨ Features
 
-- 📡 **Real-time Device Monitoring** — ICMP ping checks with live status and interactive "Live Devices" modal (Wired/Wireless filtering)
+- 📡 **Real-time Device Monitoring** — Smart ICMP ping checks (prioritizes critical/down devices), live status, and interactive "Live Devices" modal
 - 🏢 **Network Segments** — Organise devices by subnet (CIDR), with automated host discovery scanning and strict validation
 - 📊 **UniFi Integration** — Full health oversight including WAN stats, Access Point status, and throughput monitoring
 - 🚨 **Bulk Device Management** — Register multiple discovered devices to tracking in a single click
 - 📧 **Automated Alerting** — Configurable email alerts (SMTP) for device events and high latency
-- 🤖 **AI Insights** — Automated device identification (OUI + AI), 24h anomaly detection, and intelligent alert triage via Anthropic or OpenRouter
+- 🤖 **AI Insights** — Automated device identification (OUI + AI), 24h anomaly detection, and highly-efficient alert triage via Anthropic or OpenRouter
+- 🧹 **Automated Data Maintenance** — Configurable background jobs for ping history and alert data retention to maintain performance
 - 🔐 **Hardened Security** — Unified JWT authentication (Socket.IO + API), login rate limiting, atomic scan locking, and hidden production stack traces
 
 ---
@@ -129,7 +130,12 @@ All settings can be configured from the **Settings** page in the UI after loggin
 | **SMTP / Email** | Mail server and recipient settings for alerts (Managed in UI) |
 | **Ping Interval** | How often to ping tracked devices (default: 60s) |
 | **UniFi Sync Interval** | How often to pull data from UniFi (default: 5 min) |
-| **Alert Cooldown** | Minimum time between repeated alerts for the same device (default: 15 min) |
+| **Alert Cooldown** | Prevents duplicate alerts for a device within this window (default: 15 min) |
+| **Ping History Retention** | Days to keep historical ping latency data (default: 90 days) |
+| **Alert History Retention** | Days to keep historical alerts (default: 180 days) |
+
+> [!NOTE]
+> Database cleanup jobs run automatically in the background. Unresolved critical alerts are protected and never deleted by retention policies.
 
 ---
 
@@ -150,7 +156,7 @@ The AI Insights feature is optional and allows NetMon to automatically identify 
 ### 3. Features
 - **Device Identification**: Click the "Auto-Identify" button on any unknown device to get a type and manufacturer suggestion.
 - **Anomaly Detection**: NetMon analyzes the last 24h of ping logs every 10 minutes to find latency patterns.
-- **Alert Triage**: Automatically groups recent alerts into logical patterns with recommended actions.
+- **Alert Triage**: Automatically groups recent alerts into logical patterns with recommended actions. Runs efficiently by saving tokens when no new alerts have occurred.
 
 > [!IMPORTANT]
 > AI identification is rate-limited to 3 calls per device per minute to prevent API overage.

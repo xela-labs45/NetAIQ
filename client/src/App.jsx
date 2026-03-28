@@ -25,7 +25,7 @@ function PrivateRoute({ children }) {
 import { ErrorBoundary } from 'react-error-boundary';
 import { Box, Typography, Alert, AlertTitle, Button } from '@mui/material';
 
-function PageErrorFallback({ error }) {
+export function PageErrorFallback({ error }) {
     return (
         <Box sx={{ p: 4 }}>
             <Alert severity="error">

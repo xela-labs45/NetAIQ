@@ -5,6 +5,8 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import axios from 'axios';
 import StatCard from '../components/StatCard';
 import LiveDevicesModal from '../components/LiveDevicesModal';
+import { ErrorBoundary } from 'react-error-boundary';
+import { PageErrorFallback } from '../App';
 import { useSocket } from '../hooks/useSocket';
 import {
     Computer, Warning,
@@ -595,11 +597,13 @@ export default function Dashboard() {
                 </Box>
             </Box>
 
-            <LiveDevicesModal
-                open={liveModalOpen}
-                onClose={() => setLiveModalOpen(false)}
-                defaultTab={liveModalTab}
-            />
+            <ErrorBoundary FallbackComponent={PageErrorFallback}>
+                <LiveDevicesModal
+                    open={liveModalOpen}
+                    onClose={() => setLiveModalOpen(false)}
+                    defaultTab={liveModalTab}
+                />
+            </ErrorBoundary>
         </Box>
     );
 }

@@ -3,7 +3,7 @@ const {
   getAiStatus, testConnection, fetchModels, clearModelCache,
   identifyDevice, getUnidentifiedDevices, detectAnomalies, summariseAlerts
 } = require('../services/aiService');
-const { restartAiJobs } = require('../jobs/aiJob');
+const { restartAiJobs, forceTriageRun } = require('../jobs/aiJob');
 
 module.exports = async function (fastify, opts) {
   fastify.addHook('preValidation', fastify.authenticate);
@@ -112,10 +112,9 @@ module.exports = async function (fastify, opts) {
       // Run in background
       setImmediate(async () => {
         try {
-          await summariseAlerts(true);
-          fastify.io.emit('ai:analysis_complete', { type: 'alert_triage' });
+          await forceTriageRun(fastify);
         } catch (err) {
-          fastify.io.emit('ai:analysis_error', { type: 'alert_triage', message: err.message });
+          // forceTriageRun handles its own error emission
         }
       });
     }
