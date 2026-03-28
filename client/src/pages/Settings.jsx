@@ -59,6 +59,16 @@ export default function Settings() {
         alert_on_offline: true, alert_on_critical_offline: true, alert_on_online: true, alert_on_high_latency: false
     });
 
+    // Handle deep-linking to specific tabs (FIX 7)
+    useEffect(() => {
+        if (location.state?.tab !== undefined) {
+            setTabIndex(location.state.tab);
+            // Clear the state so it doesn't stay on refresh or back/forward
+            window.history.replaceState({}, document.title);
+        }
+    }, [location]);
+
+
     const [polling, setPolling] = useState({
         ping_interval_ms: '60000', unifi_interval_ms: '300000', alert_cooldown_ms: '900000',
         ping_history_retention_days: '90', alert_cooldown_minutes: '15', alert_retention_days: '180'

@@ -202,9 +202,10 @@ export default function Insights() {
             <Box sx={{ p: 4, maxWidth: 800, mx: 'auto', mt: 10 }}>
                 <Alert severity="info" variant="outlined" action={
                     msg.actions && (
-                        <Button color="inherit" size="small" onClick={() => navigate('/settings')}>
+                        <Button color="inherit" size="small" onClick={() => navigate('/settings', { state: { tab: 2 } })}>
                             Configure →
                         </Button>
+
                     )
                 }>
                     <AlertTitle>{msg.title}</AlertTitle>
