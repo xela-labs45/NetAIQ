@@ -19,12 +19,16 @@ module.exports = function (fastify) {
     };
 
     const msToCron = (ms) => {
+        if (ms <= 10000) return '*/10 * * * * *'; // 10s
+        if (ms <= 15000) return '*/15 * * * * *'; // 15s
         if (ms <= 30000) return '*/30 * * * * *'; // 30s
         if (ms <= 60000) return '* * * * *'; // 1m
         if (ms <= 120000) return '*/2 * * * *'; // 2m
         if (ms <= 300000) return '*/5 * * * *'; // 5m
+        if (ms <= 600000) return '*/10 * * * *'; // 10m
         return '* * * * *';
     };
+
 
     /**
      * Determine if a device should be pinged on this cycle based on priority:

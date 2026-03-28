@@ -613,10 +613,13 @@ export default function Settings() {
                                     select fullWidth label="ICMP Ping Interval" helperText="How often to ping all devices in the database"
                                     value={polling.ping_interval_ms} onChange={(e) => setPolling({ ...polling, ping_interval_ms: e.target.value })}
                                 >
+                                    <MenuItem value="10000">10 Seconds</MenuItem>
+                                    <MenuItem value="15000">15 Seconds</MenuItem>
                                     <MenuItem value="30000">30 Seconds</MenuItem>
                                     <MenuItem value="60000">1 Minute</MenuItem>
                                     <MenuItem value="120000">2 Minutes</MenuItem>
                                     <MenuItem value="300000">5 Minutes</MenuItem>
+                                    <MenuItem value="600000">10 Minutes</MenuItem>
                                 </TextField>
                             </Grid>
                             <Grid item xs={12}>
@@ -625,9 +628,14 @@ export default function Settings() {
                                     value={polling.unifi_interval_ms} onChange={(e) => setPolling({ ...polling, unifi_interval_ms: e.target.value })}
                                 >
                                     <MenuItem value="60000">1 Minute</MenuItem>
+                                    <MenuItem value="120000">2 Minutes</MenuItem>
                                     <MenuItem value="300000">5 Minutes</MenuItem>
+                                    <MenuItem value="600000">10 Minutes</MenuItem>
                                     <MenuItem value="900000">15 Minutes</MenuItem>
+                                    <MenuItem value="1800000">30 Minutes</MenuItem>
+                                    <MenuItem value="3600000">1 Hour</MenuItem>
                                 </TextField>
+
                             </Grid>
                         </Grid>
 
