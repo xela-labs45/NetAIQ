@@ -3,6 +3,11 @@ node_modules/
 client/node_modules/
 server/node_modules/
 
+# Environment — contains secrets
+.env
+.env.local
+.env.production
+
 # Database — contains real data and credentials
 data/
 *.db
