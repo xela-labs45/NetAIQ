@@ -70,3 +70,38 @@ CREATE TABLE IF NOT EXISTS settings (
   key TEXT PRIMARY KEY,
   value TEXT
 );
+
+CREATE TABLE IF NOT EXISTS ai_device_identifications (
+  id INTEGER PRIMARY KEY,
+  device_id INTEGER REFERENCES devices(id) ON DELETE CASCADE,
+  mac_address TEXT,
+  device_type_suggestion TEXT,
+  manufacturer TEXT,
+  os_guess TEXT,
+  owner_type TEXT,
+  confidence TEXT,
+  reasoning TEXT,
+  suggested_name TEXT,
+  raw_response TEXT,
+  provider TEXT,
+  model TEXT,
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS ai_analysis_history (
+  id INTEGER PRIMARY KEY,
+  analysis_type TEXT NOT NULL,
+  provider TEXT,
+  model TEXT,
+  result_json TEXT,
+  health_score INTEGER,
+  anomaly_count INTEGER,
+  alert_count INTEGER,
+  urgent INTEGER DEFAULT 0,
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_ai_device_id ON ai_device_identifications(device_id);
+CREATE INDEX IF NOT EXISTS idx_ai_analysis_type ON ai_analysis_history(analysis_type);
+CREATE INDEX IF NOT EXISTS idx_ai_analysis_created ON ai_analysis_history(created_at);
+

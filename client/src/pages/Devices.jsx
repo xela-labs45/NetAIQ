@@ -15,6 +15,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import axios from 'axios';
 import { LineChart, Line, XAxis, YAxis, Tooltip as RechartsTooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
 import { format } from 'date-fns';
+import { DEVICE_TYPES, getDeviceTypeIcon } from '../constants/deviceTypes';
 
 export default function Devices() {
   const queryClient = useQueryClient();
@@ -251,7 +252,22 @@ export default function Devices() {
         />
       ) : '-'
     },
-    { field: 'device_type', headerName: 'Type', width: 120, textTransform: 'capitalize' },
+    {
+      field: 'device_type',
+      headerName: 'Type',
+      width: 150,
+      renderCell: (params) => {
+        const typeObj = DEVICE_TYPES.find(t => t.value === params.row.device_type);
+        const label = typeObj ? typeObj.label : params.row.device_type;
+        const Icon = getDeviceTypeIcon(params.row.device_type);
+        return (
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            <Icon fontSize="small" sx={{ color: 'text.secondary' }} />
+            <Typography variant="body2">{label}</Typography>
+          </Box>
+        );
+      }
+    },
     {
       field: 'is_critical',
       headerName: 'Critical',
@@ -351,8 +367,13 @@ export default function Devices() {
             select fullWidth label="Device Type" margin="dense"
             value={formData.device_type} onChange={e => setFormData({ ...formData, device_type: e.target.value })}
           >
-            {['router', 'switch', 'ap', 'server', 'workstation', 'printer', 'other'].map(t => (
-              <MenuItem key={t} value={t}>{t.charAt(0).toUpperCase() + t.slice(1)}</MenuItem>
+            {DEVICE_TYPES.map((type) => (
+              <MenuItem key={type.value} value={type.value}>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                  {React.createElement(getDeviceTypeIcon(type.value), { fontSize: 'small', color: 'action' })}
+                  {type.label}
+                </Box>
+              </MenuItem>
             ))}
           </TextField>
           <TextField
@@ -410,7 +431,12 @@ export default function Devices() {
               </Grid>
               <Grid item xs={6}>
                 <Typography variant="caption" color="text.secondary">Type</Typography>
-                <Typography variant="body1" textTransform="capitalize">{selectedDevice.device_type}</Typography>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                  {React.createElement(getDeviceTypeIcon(selectedDevice.device_type), { fontSize: 'small', color: 'action' })}
+                  <Typography variant="body1">
+                    {DEVICE_TYPES.find(t => t.value === selectedDevice.device_type)?.label || selectedDevice.device_type}
+                  </Typography>
+                </Box>
               </Grid>
             </Grid>
 

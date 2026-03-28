@@ -7,11 +7,13 @@ import {
 } from '@mui/material';
 import {
     Visibility, VisibilityOff, Save as SaveIcon, PlayArrow as TestIcon,
-    CheckCircle as ConnectedIcon, Error as ErrorIcon, HelpOutline as UnknownIcon
+    CheckCircle as ConnectedIcon, Error as ErrorIcon, HelpOutline as UnknownIcon,
+    AutoAwesome as AiIcon, Refresh as RefreshIcon
 } from '@mui/icons-material';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import axios from 'axios';
 import { useAuth } from '../hooks/useAuth';
+import Autocomplete from '@mui/material/Autocomplete';
 
 function TabPanel(props) {
     const { children, value, index, ...other } = props;
@@ -22,9 +24,15 @@ function TabPanel(props) {
     );
 }
 
-// Connection status chip shown next to the UniFi tab title
 function UnifiStatusChip({ status }) {
     if (status === 'connected') return <Chip icon={<ConnectedIcon />} label="Connected" color="success" size="small" sx={{ ml: 1 }} />;
+    if (status === 'error') return <Chip icon={<ErrorIcon />} label="Error" color="error" size="small" sx={{ ml: 1 }} />;
+    if (status === 'testing') return <Chip icon={<CircularProgress size={12} />} label="Testing…" size="small" sx={{ ml: 1 }} />;
+    return null;
+}
+
+function AiStatusChip({ status }) {
+    if (status === 'connected') return <Chip icon={<ConnectedIcon />} label="Ready" color="success" size="small" sx={{ ml: 1 }} />;
     if (status === 'error') return <Chip icon={<ErrorIcon />} label="Error" color="error" size="small" sx={{ ml: 1 }} />;
     if (status === 'testing') return <Chip icon={<CircularProgress size={12} />} label="Testing…" size="small" sx={{ ml: 1 }} />;
     return null;
@@ -38,6 +46,7 @@ export default function Settings() {
     const [showPassword, setShowPassword] = useState(false);
     const [toast, setToast] = useState({ open: false, message: '', severity: 'info' });
     const [unifiStatus, setUnifiStatus] = useState(null); // null | 'testing' | 'connected' | 'error'
+    const [aiStatus, setAiStatus] = useState(null); // null | 'testing' | 'connected' | 'error'
 
     // Forms state
     const [unifi, setUnifi] = useState({
@@ -52,6 +61,17 @@ export default function Settings() {
 
     const [polling, setPolling] = useState({
         ping_interval_ms: '60000', unifi_interval_ms: '300000', alert_cooldown_ms: '900000'
+    });
+
+    const [ai, setAi] = useState({
+        ai_provider: 'anthropic',
+        ai_anthropic_key: '',
+        ai_openrouter_key: '',
+        ai_model: 'claude-3-5-sonnet-20241022',
+        ai_system_prompt: '',
+        ai_identify_interval_ms: '3600000',
+        ai_analysis_interval_ms: '21600000',
+        ai_enabled: true
     });
 
     const [passwordForm, setPasswordForm] = useState({
@@ -103,6 +123,17 @@ export default function Settings() {
             ping_interval_ms: s.ping_interval_ms || '60000',
             unifi_interval_ms: s.unifi_interval_ms || '300000',
             alert_cooldown_ms: s.alert_cooldown_ms || '900000',
+        });
+
+        setAi({
+            ai_provider: s.ai_provider || 'anthropic',
+            ai_anthropic_key: s.ai_anthropic_key || '',
+            ai_openrouter_key: s.ai_openrouter_key || '',
+            ai_model: s.ai_model || 'claude-3-5-sonnet-20241022',
+            ai_system_prompt: s.ai_system_prompt || 'You are an expert IT network administrator. Analyze this network data.',
+            ai_identify_interval_ms: s.ai_identify_interval_ms || '3600000', // 1 hour
+            ai_analysis_interval_ms: s.ai_analysis_interval_ms || '21600000', // 6 hours
+            ai_enabled: s.ai_enabled !== '0'
         });
     }, [settingsData]);
 
@@ -160,6 +191,61 @@ export default function Settings() {
         onError: (err) => showToast(err.response?.data?.message || 'Failed to send test email', 'error')
     });
 
+    const saveAi = useMutation({
+        mutationFn: (data) => axios.put('/api/v1/settings/ai', data),
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: ['settings'] });
+            showToast('AI Settings saved. Jobs restarted.');
+        }
+    });
+
+    const testAi = useMutation({
+        mutationFn: () => {
+            const key = ai.ai_provider === 'anthropic' ? ai.ai_anthropic_key : ai.ai_openrouter_key;
+            return axios.post('/api/v1/ai/test-connection', {
+                provider: ai.ai_provider,
+                api_key: key && !key.startsWith('sk-ant-*') && !key.startsWith('sk-or-*') ? key : undefined,
+                model: ai.ai_model
+            });
+        },
+        onMutate: () => setAiStatus('testing'),
+        onSuccess: (res) => {
+            setAiStatus('connected');
+            showToast(res.data.message || 'AI Connection successful');
+        },
+        onError: (err) => {
+            setAiStatus('error');
+            showToast(err.response?.data?.error || 'AI Connection failed', 'error');
+        }
+    });
+
+    const { data: modelsData, isLoading: isLoadingModels, refetch: refetchModels } = useQuery({
+        queryKey: ['aiModels', ai.ai_provider, ai.ai_anthropic_key, ai.ai_openrouter_key],
+        queryFn: () => {
+            const key = ai.ai_provider === 'anthropic' ? ai.ai_anthropic_key : ai.ai_openrouter_key;
+            // Only fetch if we have a key (or it's 'sk-***' which means use the stored one)
+            return axios.get('/api/v1/ai/models', {
+                params: {
+                    provider: ai.ai_provider,
+                    api_key: key && key !== 'sk-***' ? key : undefined
+                }
+            }).then(res => res.data);
+        },
+        enabled: (!!ai.ai_anthropic_key || !!ai.ai_openrouter_key) && !!ai.ai_provider,
+        staleTime: 600000, // 10 mins
+    });
+
+    const fetchAiStatus = useQuery({
+        queryKey: ['aiStatus'],
+        queryFn: () => axios.get('/api/v1/ai/status').then(res => res.data),
+        onSuccess: (data) => {
+            if (data.status === 'ok') setAiStatus('connected');
+            else if (data.status === 'error') setAiStatus('error');
+        },
+        retry: false,
+        refetchOnWindowFocus: false
+    });
+
     const handlePasswordSubmit = (e) => {
         e.preventDefault();
         if (passwordForm.new_password !== passwordForm.confirm_password) {
@@ -189,6 +275,12 @@ export default function Settings() {
                             </Box>
                         } />
                         <Tab label="Email Alerts" />
+                        <Tab label={
+                            <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                                AI Insights
+                                <AiStatusChip status={aiStatus} />
+                            </Box>
+                        } />
                         <Tab label="Polling Intervals" />
                         <Tab label="Account" />
                     </Tabs>
@@ -351,8 +443,156 @@ export default function Settings() {
                     </Box>
                 </TabPanel>
 
-                {/* POLLING TAB */}
+                {/* AI TAB */}
                 <TabPanel value={tabIndex} index={2}>
+                    <Box sx={{ p: 4, maxWidth: 800 }}>
+                        <Typography variant="h6" gutterBottom>AI Assistant Configuration</Typography>
+                        <Typography variant="body2" color="text.secondary" sx={{ mb: 4 }}>
+                            Configure the AI provider and models used for intelligent device identification and anomaly detection.
+                        </Typography>
+
+                        <FormControlLabel
+                            sx={{ mb: 3 }}
+                            control={<Switch checked={ai.ai_enabled} onChange={(e) => setAi({ ...ai, ai_enabled: e.target.checked })} color="primary" />}
+                            label="Enable AI Insights (Background Jobs)"
+                        />
+
+                        <Grid container spacing={3} sx={{ mb: 4 }}>
+                            <Grid item xs={12} sm={6}>
+                                <TextField
+                                    select fullWidth label="AI Provider"
+                                    value={ai.ai_provider}
+                                    onChange={(e) => setAi({ ...ai, ai_provider: e.target.value })}
+                                >
+                                    <MenuItem value="anthropic">Anthropic (Claude)</MenuItem>
+                                    <MenuItem value="openrouter">OpenRouter</MenuItem>
+                                </TextField>
+                            </Grid>
+                            <Grid item xs={12} sm={6}>
+                                <Autocomplete
+                                    freeSolo
+                                    options={modelsData?.models || []}
+                                    getOptionLabel={(option) => typeof option === 'string' ? option : option.label || option.id}
+                                    value={ai.ai_model}
+                                    onChange={(e, newValue) => {
+                                        const val = typeof newValue === 'string' ? newValue : newValue?.id;
+                                        if (val) setAi({ ...ai, ai_model: val });
+                                    }}
+                                    onInputChange={(e, newInputValue) => {
+                                        setAi({ ...ai, ai_model: newInputValue });
+                                    }}
+                                    renderInput={(params) => (
+                                        <TextField
+                                            {...params}
+                                            fullWidth label="Model Name"
+                                            helperText={modelsData?.fallback ? "Provider API failed, using fallbacks." : (isLoadingModels ? "Loading models..." : "Select or type a model ID")}
+                                            InputProps={{
+                                                ...params.InputProps,
+                                                endAdornment: (
+                                                    <React.Fragment>
+                                                        {isLoadingModels ? <CircularProgress color="inherit" size={20} /> : (
+                                                            <IconButton size="small" onClick={() => refetchModels()} title="Refresh model list">
+                                                                <RefreshIcon fontSize="small" />
+                                                            </IconButton>
+                                                        )}
+                                                        {params.InputProps.endAdornment}
+                                                    </React.Fragment>
+                                                ),
+                                            }}
+                                        />
+                                    )}
+                                />
+                            </Grid>
+                            <Grid item xs={12}>
+                                {ai.ai_provider === 'anthropic' ? (
+                                    <TextField
+                                        fullWidth label="Anthropic API Key" type="password"
+                                        value={ai.ai_anthropic_key}
+                                        onChange={(e) => setAi({ ...ai, ai_anthropic_key: e.target.value })}
+                                        placeholder={ai.ai_anthropic_key?.startsWith('sk-ant-*') ? 'Key saved — enter new to change' : ''}
+                                        helperText={ai.ai_anthropic_key?.startsWith('sk-ant-*') ? 'An API key is already saved.' : 'Starts with sk-ant-'}
+                                    />
+                                ) : (
+                                    <TextField
+                                        fullWidth label="OpenRouter API Key" type="password"
+                                        value={ai.ai_openrouter_key}
+                                        onChange={(e) => setAi({ ...ai, ai_openrouter_key: e.target.value })}
+                                        placeholder={ai.ai_openrouter_key?.startsWith('sk-or-*') ? 'Key saved — enter new to change' : ''}
+                                        helperText={ai.ai_openrouter_key?.startsWith('sk-or-*') ? 'An API key is already saved.' : 'Starts with sk-or-v1-'}
+                                    />
+                                )}
+                            </Grid>
+                            <Grid item xs={12}>
+                                <TextField
+                                    fullWidth label="System Prompt (Optional)" multiline rows={3}
+                                    value={ai.ai_system_prompt}
+                                    onChange={(e) => setAi({ ...ai, ai_system_prompt: e.target.value })}
+                                    helperText="Custom instructions for the AI on how to analyze the network."
+                                />
+                            </Grid>
+                        </Grid>
+
+                        <Typography variant="h6" gutterBottom>AI Background Jobs</Typography>
+                        <Grid container spacing={4} sx={{ mb: 4 }}>
+                            <Grid item xs={12} sm={6}>
+                                <TextField
+                                    select fullWidth label="Device Identify Interval"
+                                    value={ai.ai_identify_interval_ms}
+                                    onChange={(e) => setAi({ ...ai, ai_identify_interval_ms: e.target.value })}
+                                    helperText="How often to try identifying unknown devices"
+                                >
+                                    <MenuItem value="900000">15 Minutes</MenuItem>
+                                    <MenuItem value="3600000">1 Hour</MenuItem>
+                                    <MenuItem value="14400000">4 Hours</MenuItem>
+                                    <MenuItem value="86400000">24 Hours</MenuItem>
+                                </TextField>
+                            </Grid>
+                            <Grid item xs={12} sm={6}>
+                                <TextField
+                                    select fullWidth label="Anomaly Analysis Interval"
+                                    value={ai.ai_analysis_interval_ms}
+                                    onChange={(e) => setAi({ ...ai, ai_analysis_interval_ms: e.target.value })}
+                                    helperText="How often to scan alerts & traffic for anomalies"
+                                >
+                                    <MenuItem value="3600000">1 Hour</MenuItem>
+                                    <MenuItem value="21600000">6 Hours</MenuItem>
+                                    <MenuItem value="43200000">12 Hours</MenuItem>
+                                    <MenuItem value="86400000">24 Hours</MenuItem>
+                                </TextField>
+                            </Grid>
+                        </Grid>
+
+                        {/* Connection status info box */}
+                        {aiStatus && (
+                            <Box sx={{
+                                p: 2, mb: 4, borderRadius: 1,
+                                bgcolor: aiStatus === 'connected' ? 'success.main' : aiStatus === 'error' ? 'error.main' : 'rgba(255,255,255,0.05)',
+                                display: 'flex', alignItems: 'center', gap: 1
+                            }}>
+                                {aiStatus === 'connected' && <ConnectedIcon fontSize="small" />}
+                                {aiStatus === 'error' && <ErrorIcon fontSize="small" />}
+                                {aiStatus === 'testing' && <CircularProgress size={16} />}
+                                <Typography variant="body2">
+                                    {aiStatus === 'connected' && `Successfully connected to ${ai.ai_provider} AI`}
+                                    {aiStatus === 'error' && 'Failed to connect to AI API — check key, provider, and network'}
+                                    {aiStatus === 'testing' && 'Testing AI API connection…'}
+                                </Typography>
+                            </Box>
+                        )}
+
+                        <Box sx={{ display: 'flex', gap: 2 }}>
+                            <Button variant="contained" startIcon={<SaveIcon />} onClick={() => saveAi.mutate(ai)} disabled={saveAi.isPending}>
+                                {saveAi.isPending ? 'Saving…' : 'Save and Restart Jobs'}
+                            </Button>
+                            <Button variant="outlined" startIcon={<TestIcon />} onClick={() => testAi.mutate()} disabled={testAi.isPending || (!ai.ai_anthropic_key && !ai.ai_openrouter_key) || (ai.ai_anthropic_key?.startsWith('sk-ant-*') && ai.ai_openrouter_key?.startsWith('sk-or-*'))}>
+                                {testAi.isPending ? 'Testing…' : 'Test Connection'}
+                            </Button>
+                        </Box>
+                    </Box>
+                </TabPanel>
+
+                {/* POLLING TAB */}
+                <TabPanel value={tabIndex} index={3}>
                     <Box sx={{ p: 4, maxWidth: 600 }}>
                         <Typography variant="h6" gutterBottom>Background Jobs Configuration</Typography>
                         <Grid container spacing={4}>
@@ -398,7 +638,7 @@ export default function Settings() {
                 </TabPanel>
 
                 {/* ACCOUNT TAB */}
-                <TabPanel value={tabIndex} index={3}>
+                <TabPanel value={tabIndex} index={4}>
                     <Box sx={{ p: 4, maxWidth: 600 }}>
                         <Typography variant="h6" gutterBottom>Admin Account</Typography>
                         <Box sx={{ mb: 4, p: 2, bgcolor: 'rgba(255,255,255,0.03)', borderRadius: 1 }}>

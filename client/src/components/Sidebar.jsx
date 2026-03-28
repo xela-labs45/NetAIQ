@@ -14,7 +14,8 @@ import {
     Logout as LogoutIcon,
     Speed as SpeedIcon,
     Menu as MenuIcon,
-    MenuOpen as MenuOpenIcon
+    MenuOpen as MenuOpenIcon,
+    AutoAwesome as AiIcon
 } from '@mui/icons-material';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
@@ -67,6 +68,7 @@ export default function Sidebar({ open, toggle }) {
             ),
             path: '/alerts'
         },
+        { text: 'AI Insights', icon: <AiIcon />, path: '/insights' },
         { text: 'Settings', icon: <SettingsIcon />, path: '/settings' },
     ];
 

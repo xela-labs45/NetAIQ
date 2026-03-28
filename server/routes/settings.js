@@ -24,9 +24,11 @@ module.exports = async function (fastify, opts) {
             return acc;
         }, {});
 
-        // Mask passwords
+        // Mask passwords and API keys
         if (settings.unifi_password) settings.unifi_password = '••••••••';
         if (settings.smtp_pass) settings.smtp_pass = '••••••••';
+        if (settings.ai_claude_key) settings.ai_claude_key = `sk-ant-${'*'.repeat(8)}`;
+        if (settings.ai_openrouter_key) settings.ai_openrouter_key = `sk-or-${'*'.repeat(8)}`;
 
         return settings;
     };
@@ -53,6 +55,33 @@ module.exports = async function (fastify, opts) {
         saveSettings(body);
         reply.send({ success: true });
     });
+
+    fastify.put('/ai', async (request, reply) => {
+        const body = { ...request.body };
+        if (body.ai_claude_key?.startsWith('sk-ant-*')) {
+            delete body.ai_claude_key;
+        }
+        if (body.ai_anthropic_key?.startsWith('sk-ant-*')) {
+            delete body.ai_anthropic_key;
+        }
+        if (body.ai_openrouter_key?.startsWith('sk-or-*')) {
+            delete body.ai_openrouter_key;
+        }
+
+        // Sync ai_anthropic_key → ai_claude_key for backward compatibility
+        if (body.ai_anthropic_key) {
+            body.ai_claude_key = body.ai_anthropic_key;
+        }
+
+        saveSettings(body);
+
+        // Restart AI jobs with new settings
+        const { restartAiJobs } = require('../jobs/aiJob');
+        restartAiJobs(fastify);
+
+        reply.send({ success: true });
+    });
+
 
     fastify.put('/polling', async (request, reply) => {
         saveSettings(request.body);

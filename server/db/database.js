@@ -30,10 +30,17 @@ const tableCheck = db.prepare("SELECT count(*) as count FROM sqlite_master WHERE
 if (tableCheck.count === 0) {
     initDb();
 } else {
-    // Ensure missing indexes are created on startup
+    // Ensure missing tables and indexes are created on startup
     const schemaPath = path.join(__dirname, 'schema.sql');
     const schema = fs.readFileSync(schemaPath, 'utf8');
-    // Extract only CREATE INDEX statements and run them
+
+    // Extract and run CREATE TABLE statements
+    const tableStmts = schema.match(/CREATE TABLE IF NOT EXISTS.*?;/gs);
+    if (tableStmts) {
+        tableStmts.forEach(stmt => db.exec(stmt));
+    }
+
+    // Extract and run CREATE INDEX statements
     const indexStmts = schema.match(/CREATE INDEX IF NOT EXISTS.*?;/gs);
     if (indexStmts) {
         indexStmts.forEach(stmt => db.exec(stmt));

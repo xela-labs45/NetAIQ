@@ -64,6 +64,7 @@ fastify.register(require('./routes/segments'), { prefix: '/api/v1/segments' });
 fastify.register(require('./routes/alerts'), { prefix: '/api/v1/alerts' });
 fastify.register(require('./routes/unifi'), { prefix: '/api/v1/unifi' });
 fastify.register(require('./routes/settings'), { prefix: '/api/v1/settings' });
+fastify.register(require('./routes/ai'), { prefix: '/api/v1/ai' });
 
 // Fallback for React Router in production
 fastify.setNotFoundHandler((request, reply) => {
@@ -132,6 +133,8 @@ const start = async () => {
     require('./jobs/pingJob')(fastify);
     require('./jobs/unifiJob')(fastify);
     require('./jobs/scanJob')(fastify);
+    const { startAiJobs } = require('./jobs/aiJob');
+    startAiJobs(fastify);
 
   } catch (err) {
     fastify.log.error(err);

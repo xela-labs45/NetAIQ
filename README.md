@@ -21,6 +21,7 @@
 - 📊 **UniFi Integration** — Full health oversight including WAN stats, Access Point status, and throughput monitoring
 - 🚨 **Bulk Device Management** — Register multiple discovered devices to tracking in a single click
 - 📧 **Automated Alerting** — Configurable email alerts (SMTP) for device events and high latency
+- 🤖 **AI Insights** — Automated device identification (OUI + AI), 24h anomaly detection, and intelligent alert triage via Anthropic or OpenRouter
 - 🔐 **Hardened Security** — Unified JWT authentication (Socket.IO + API), login rate limiting, atomic scan locking, and hidden production stack traces
 
 ---
@@ -42,6 +43,7 @@
 | **Validation** | `zod` (Strict schema-based input validation) |
 | **Monitoring** | `ping`, `node-cron`, `p-limit`, `netmask` |
 | **Notifications** | Nodemailer (SMTP) |
+| **AI Providers** | Anthropic (e.g., Claude 3.5), OpenRouter (e.g., Llama 3, Mistral) |
 | **Deployment** | Docker, Docker Compose |
 
 ---
@@ -131,6 +133,30 @@ All settings can be configured from the **Settings** page in the UI after loggin
 
 ---
 
+## 🤖 AI Insights Configuration
+
+The AI Insights feature is optional and allows NetMon to automatically identify unknown devices and perform background network analysis.
+
+### 1. Requirements
+- An API Key from [Anthropic](https://console.anthropic.com/) or [OpenRouter](https://openrouter.ai/).
+
+### 2. Setup
+1. Log in to NetMon and navigate to **Settings > AI Settings**.
+2. **Enable AI Insights**: Toggle the switch to ON.
+3. **Select Provider**: Choose between Anthropic or OpenRouter.
+4. **Enter API Key**: Paste your key and click **Test Connection**.
+5. **Configure Model**: Select a model from the dynamic dropdown (e.g., `Claude 3.5 Sonnet`).
+
+### 3. Features
+- **Device Identification**: Click the "Auto-Identify" button on any unknown device to get a type and manufacturer suggestion.
+- **Anomaly Detection**: NetMon analyzes the last 24h of ping logs every 10 minutes to find latency patterns.
+- **Alert Triage**: Automatically groups recent alerts into logical patterns with recommended actions.
+
+> [!IMPORTANT]
+> AI identification is rate-limited to 3 calls per device per minute to prevent API overage.
+
+---
+
 ## 🗃️ Data Persistence
 
 The SQLite database is stored in the `./data/` directory on your host machine, mapped into the container via a Docker volume. Your data survives container restarts and updates.
@@ -165,6 +191,11 @@ All endpoints are prefixed with `/api/v1/` and require authentication (JWT cooki
 | `GET` | `/unifi/wlan` | Get Access Point health and WiFi throughput |
 | `GET` | `/unifi/clients-usage` | Get Top Clients with hostname resolution |
 | `GET/PUT` | `/settings` | Read/update application settings |
+| `GET` | `/ai/status` | Get current AI configuration and availability |
+| `GET` | `/ai/anomalies` | Get latest 24h anomaly analysis |
+| `GET` | `/ai/alert-summary` | Get latest 48h alert triage summary |
+| `POST` | `/ai/identify-device` | Trigger AI identification for a specific device |
+| `GET` | `/ai/models` | Fetch real-time model list from provider |
 
 ---
 
@@ -229,6 +260,11 @@ Ensure your `JWT_SECRET` in `.env` is a long, random string. If you changed it w
 ### UniFi Integration Issues
 - **Connection Failed:** Verify the Controller URL (use `https://`) and credentials. Use the **Test Connection** button in Settings.
 - **Data Not Appearing:** Check the logs (`docker compose logs -f netmon`) for specific API errors.
+
+### AI Insights Issues
+- **502 Bad Gateway:** If after updating you see a 502 error, ensure all container dependencies are built correctly with `docker compose up -d --build netmon`.
+- **"AI Provider Not Configured":** Ensure you have both enabled the feature AND provided a valid API key in Settings.
+- **No Models in Dropdown:** Check your internet connection and verify your API key is active. Use the "Refresh Models" button.
 
 ---
 

@@ -19,6 +19,7 @@ import {
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import axios from 'axios';
 import { useSocket } from '../hooks/useSocket';
+import { DEVICE_TYPES, getDeviceTypeIcon } from '../constants/deviceTypes';
 
 export default function LiveDevicesModal({ open, onClose, defaultTab = 'all' }) {
     const queryClient = useQueryClient();
@@ -325,8 +326,13 @@ export default function LiveDevicesModal({ open, onClose, defaultTab = 'all' }) 
                         select fullWidth label="Device Type" margin="dense"
                         value={addFormData.device_type} onChange={e => setAddFormData({ ...addFormData, device_type: e.target.value })}
                     >
-                        {['router', 'switch', 'ap', 'server', 'workstation', 'printer', 'other'].map(t => (
-                            <MenuItem key={t} value={t}>{t.charAt(0).toUpperCase() + t.slice(1)}</MenuItem>
+                        {DEVICE_TYPES.map((type) => (
+                            <MenuItem key={type.value} value={type.value}>
+                                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                                    {React.createElement(getDeviceTypeIcon(type.value), { fontSize: 'small', color: 'action' })}
+                                    {type.label}
+                                </Box>
+                            </MenuItem>
                         ))}
                     </TextField>
                     <TextField

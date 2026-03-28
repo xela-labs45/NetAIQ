@@ -7,6 +7,7 @@ import Segments from './pages/Segments';
 import Bandwidth from './pages/Bandwidth';
 import Alerts from './pages/Alerts';
 import Settings from './pages/Settings';
+import Insights from './pages/Insights';
 import { useAuth } from './hooks/useAuth';
 
 function PrivateRoute({ children }) {
@@ -81,6 +82,11 @@ function App() {
                 <Route path="settings" element={
                     <ErrorBoundary FallbackComponent={PageErrorFallback}>
                         <Settings />
+                    </ErrorBoundary>
+                } />
+                <Route path="insights" element={
+                    <ErrorBoundary FallbackComponent={PageErrorFallback}>
+                        <Insights />
                     </ErrorBoundary>
                 } />
             </Route>
