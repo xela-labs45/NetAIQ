@@ -5,6 +5,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import axios from 'axios';
 import StatCard from '../components/StatCard';
 import LiveDevicesModal from '../components/LiveDevicesModal';
+import ApDevicesModal from '../components/ApDevicesModal';
 import { ErrorBoundary } from 'react-error-boundary';
 import { PageErrorFallback } from '../App';
 import { useSocket } from '../hooks/useSocket';
@@ -22,6 +23,8 @@ import { PieChart, Pie, Cell, Tooltip as RechartsTooltip, ResponsiveContainer } 
 export default function Dashboard() {
     const [liveModalOpen, setLiveModalOpen] = React.useState(false);
     const [liveModalTab, setLiveModalTab] = React.useState('all');
+    const [apModalOpen, setApModalOpen] = React.useState(false);
+    const [apModalFilter, setApModalFilter] = React.useState('all');
     const queryClient = useQueryClient();
     const socket = useSocket();
 
@@ -137,10 +140,10 @@ export default function Dashboard() {
         || unifiSettings?.data?.unifi_url
         || '#';
 
-    const handleApCardClick = () => {
-        if (unifi_url && unifi_url !== '#') {
-            window.open(unifi_url, '_blank', 'noopener,noreferrer');
-        }
+    const handleApCardClick = (e, filter = 'all') => {
+        if (e) e.stopPropagation();
+        setApModalFilter(filter);
+        setApModalOpen(true);
     };
 
     const pieData = [
@@ -213,8 +216,12 @@ export default function Dashboard() {
                         display: 'flex',
                         flexDirection: 'column',
                         borderLeft: `4px solid ${num_disconnected === 0 ? '#22c55e' : '#ef4444'}`,
-                        position: 'relative'
-                    }}>
+                        position: 'relative',
+                        cursor: 'pointer',
+                        '&:hover': { bgcolor: 'rgba(255,255,255,0.02)' }
+                    }}
+                        onClick={(e) => handleApCardClick(e, 'all')}
+                    >
                         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 1 }}>
                             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                                 <APTetheringIcon sx={{ color: 'text.secondary', fontSize: 20 }} />
@@ -236,8 +243,14 @@ export default function Dashboard() {
                                 <Box sx={{
                                     px: 1, py: 0.2, borderRadius: 1,
                                     bgcolor: num_disconnected > 0 ? 'rgba(239, 68, 68, 0.1)' : 'rgba(156, 163, 175, 0.1)',
-                                    border: num_disconnected > 0 ? '1px solid rgba(239, 68, 68, 0.2)' : '1px solid rgba(156, 163, 175, 0.2)'
-                                }}>
+                                    border: num_disconnected > 0 ? '1px solid rgba(239, 68, 68, 0.2)' : '1px solid rgba(156, 163, 175, 0.2)',
+                                    cursor: num_disconnected > 0 ? 'pointer' : 'default',
+                                    '&:hover': num_disconnected > 0 ? { bgcolor: 'rgba(239, 68, 68, 0.15)' } : {}
+                                }}
+                                    onClick={(e) => {
+                                        if (num_disconnected > 0) handleApCardClick(e, 'offline');
+                                    }}
+                                >
                                     <Typography variant="caption" sx={{ color: num_disconnected > 0 ? '#ef4444' : '#9ca3af', fontSize: '0.7rem', fontWeight: 'bold' }}>
                                         {num_disconnected} offline
                                     </Typography>
@@ -264,11 +277,8 @@ export default function Dashboard() {
                         <Box
                             sx={{
                                 mt: 2, pt: 1, borderTop: '1px solid rgba(255,255,255,0.06)',
-                                display: 'flex', alignItems: 'center', gap: 1,
-                                cursor: num_disconnected > 0 ? 'pointer' : 'default',
-                                '&:hover': num_disconnected > 0 ? { bgcolor: 'rgba(255,255,255,0.02)' } : {}
+                                display: 'flex', alignItems: 'center', gap: 1
                             }}
-                            onClick={handleApCardClick}
                         >
                             {num_disconnected === 0 ? (
                                 <>
@@ -602,6 +612,15 @@ export default function Dashboard() {
                     open={liveModalOpen}
                     onClose={() => setLiveModalOpen(false)}
                     defaultTab={liveModalTab}
+                />
+            </ErrorBoundary>
+
+            <ErrorBoundary FallbackComponent={PageErrorFallback}>
+                <ApDevicesModal
+                    open={apModalOpen}
+                    onClose={() => setApModalOpen(false)}
+                    defaultTab={apModalFilter}
+                    unifiUrl={unifi_url}
                 />
             </ErrorBoundary>
         </Box>
