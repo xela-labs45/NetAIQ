@@ -55,7 +55,11 @@ module.exports = async function (fastify, opts) {
         query += ` ORDER BY dd.last_seen DESC LIMIT ? OFFSET ?`;
         params.push(parseInt(limit, 10), parseInt(offset, 10));
 
-        const devices = db.prepare(query).all(...params);
+        const devices = db.prepare(query).all(...params).map(d => ({
+            ...d,
+            is_wired: d.is_wired === 1 ? true : d.is_wired === 0 ? false : null,
+            ai_identified: d.ai_identified === 1
+        }));
         return reply.send({ devices });
     });
 

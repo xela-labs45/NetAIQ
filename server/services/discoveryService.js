@@ -17,6 +17,8 @@ const macTrackingStats = {
     lastReset: Date.now()
 };
 
+let arpScanRunning = false;
+
 function getMacTrackingStats() {
     return { ...macTrackingStats };
 }
@@ -185,24 +187,22 @@ function parseArpOutput(output) {
     const lines = output.split('\n');
 
     for (const line of lines) {
-        // Linux format: hostname (ip) at mac [ether] on iface
-        const linuxMatch = line.match(/(\S+)\s+\((\d+\.\d+\.\d+\.\d+)\)\s+at\s+([0-9a-fA-F:]{17})/);
-        if (linuxMatch) {
-            entries.push({
-                hostname: linuxMatch[1] !== '?' ? linuxMatch[1] : null,
-                ip: linuxMatch[2],
-                mac: linuxMatch[3]
-            });
-            continue;
-        }
+        // Robust regex to capture IP and MAC from common "arp -a" outputs
+        // Matches:
+        // - "hostname (1.2.3.4) at 00:11:22:33:44:55 [ether]"
+        // - "? (1.2.3.4) at 00:11:22:33:44:55 [ether]"
+        // - "1.2.3.4  00-11-22-33-44-55  static"
+        // - "1.2.3.4  00:11:22:33:44:55"
 
-        // Windows format: ip  mac  type
-        const winMatch = line.match(/(\d+\.\d+\.\d+\.\d+)\s+([0-9a-fA-F\-]{17})\s+\w+/);
-        if (winMatch) {
+        const ipMatch = line.match(/(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})/);
+        const macMatch = line.match(/([0-9a-fA-F]{2}[:\-][0-9a-fA-F]{2}[:\-][0-9a-fA-F]{2}[:\-][0-9a-fA-F]{2}[:\-][0-9a-fA-F]{2}[:\-][0-9a-fA-F]{2})/);
+        const hostMatch = line.match(/^(\S+)\s+\(/); // Try to get hostname if it exists at start of line
+
+        if (ipMatch && macMatch) {
             entries.push({
-                hostname: null,
-                ip: winMatch[1],
-                mac: winMatch[2].replace(/-/g, ':')
+                hostname: (hostMatch && hostMatch[1] !== '?') ? hostMatch[1] : null,
+                ip: ipMatch[1],
+                mac: macMatch[1].replace(/-/g, ':').toLowerCase()
             });
         }
     }
@@ -226,7 +226,8 @@ async function readArpCache() {
 }
 
 async function arpScanSegment(segmentId, fastify) {
-    const segment = db.prepare('SELECT * FROM segments WHERE id = ?').get(segmentId);
+    const sId = Number(segmentId);
+    const segment = db.prepare('SELECT * FROM segments WHERE id = ?').get(sId);
     if (!segment) throw new Error('Segment not found');
 
     // Parse IP range from CIDR
@@ -237,7 +238,7 @@ async function arpScanSegment(segmentId, fastify) {
     // Emit scan started event
     if (fastify && fastify.io) {
         fastify.io.emit('discovery:arp_started', {
-            segment_id: segmentId,
+            segment_id: sId,
             total_ips: ips.length
         });
     }
@@ -255,7 +256,7 @@ async function arpScanSegment(segmentId, fastify) {
         // Emit progress every 10 IPs
         if (fastify && fastify.io && pinged % 10 === 0) {
             fastify.io.emit('discovery:arp_progress', {
-                segment_id: segmentId,
+                segment_id: sId,
                 pinged,
                 total: ips.length
             });
@@ -282,7 +283,7 @@ async function arpScanSegment(segmentId, fastify) {
             hostname: entry.hostname || null,
             is_wired: 1,    // ARP scan = wired assumption
             source: 'arp_scan',
-            segment_id: segmentId
+            segment_id: sId
         });
 
         scanResultsForMerge.push({
@@ -301,7 +302,7 @@ async function arpScanSegment(segmentId, fastify) {
         db.prepare(`
             INSERT INTO scan_results (segment_id, total_ips, online_count, raw_json)
             VALUES (?, ?, ?, ?)
-        `).run(segmentId, ips.length, discovered, JSON.stringify(scanResultsForMerge));
+        `).run(sId, ips.length, discovered, JSON.stringify(scanResultsForMerge));
     } catch (e) {
         console.error('Failed to save ARP scan to scan_results:', e.message);
     }
@@ -309,7 +310,7 @@ async function arpScanSegment(segmentId, fastify) {
     // Emit completion
     if (fastify && fastify.io) {
         fastify.io.emit('discovery:arp_complete', {
-            segment_id: segmentId,
+            segment_id: sId,
             ips_pinged: ips.length,
             macs_found: discovered
         });
