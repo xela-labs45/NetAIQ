@@ -18,7 +18,8 @@
 
 - 📡 **Real-time Device Monitoring** — Smart ICMP ping checks (prioritizes critical/down devices), live status, and interactive "Live Devices" modal
 - 🏢 **Network Segments** — Organise devices by subnet (CIDR), with automated host discovery scanning and strict validation
-- 📊 **UniFi Integration** — Full health oversight including WAN stats, Access Point status, and throughput monitoring
+- � **MAC OUI Lookup** — 1,100+ device manufacturers recognized instantly (IoT, mobile, gaming, network, servers, cameras)
+- � **UniFi Integration** — Full health oversight including WAN stats, Access Point status, and throughput monitoring
 - 🚨 **Bulk Device Management** — Register multiple discovered devices to tracking in a single click
 - 📧 **Automated Alerting** — Configurable email alerts (SMTP) for device events and high latency
 - 🤖 **AI Insights** — Automated device identification (OUI + AI), 24h anomaly detection, and highly-efficient alert triage via Anthropic or OpenRouter
@@ -154,9 +155,17 @@ The AI Insights feature is optional and allows NetMon to automatically identify 
 5. **Configure Model**: Select a model from the dynamic dropdown (e.g., `Claude 3.5 Sonnet`).
 
 ### 3. Features
-- **Device Identification**: Click the "Auto-Identify" button on any unknown device to get a type and manufacturer suggestion.
+- **Device Identification**: OUI lookup recognizes 1,100+ manufacturers instantly (Sony, Samsung, Apple, Hikvision, Supermicro, and more). Click "Auto-Identify" for AI-powered suggestions on unknown devices.
 - **Anomaly Detection**: NetMon analyzes the last 24h of ping logs every 10 minutes to find latency patterns.
 - **Alert Triage**: Automatically groups recent alerts into logical patterns with recommended actions. Runs efficiently by saving tokens when no new alerts have occurred.
+
+### 4. MAC Tracking & Deduplication
+NetMon tracks discovered devices with intelligent MAC address handling:
+- **Normalization**: MACs are stored in a consistent lowercase format with colons
+- **Duplicate Prevention**: Duplicate MACs are automatically detected and updated rather than re-inserted
+- **IP Change Tracking**: When a device changes IP addresses, NetMon logs the change while maintaining the same device record
+- **Multicast/Broadcast Filtering**: Invalid MAC addresses are automatically filtered out
+- **Statistics**: Real-time stats track inserted, updated, and ignored devices via `/api/v1/discovery/mac-stats`
 
 > [!IMPORTANT]
 > AI identification is rate-limited to 3 calls per device per minute to prevent API overage.
@@ -192,6 +201,12 @@ All endpoints are prefixed with `/api/v1/` and require authentication (JWT cooki
 | `GET` | `/alerts` | List alerts |
 | `PUT` | `/alerts/:id/read` | Mark alert as read |
 | `PUT` | `/alerts/read-all` | Mark all alerts as read |
+| `GET` | `/discovered-devices` | List discovered devices from ARP scans |
+| `GET` | `/discovered-devices/:id` | Get single discovered device details |
+| `POST` | `/discovery/arp-scan` | Start ARP scan on a segment |
+| `GET` | `/discovery/mac-stats` | Get MAC tracking statistics (inserted, updated, ignored, IP changes) |
+| `POST` | `/discovery/mac-stats/reset` | Reset MAC tracking statistics |
+| `POST` | `/discovery/harvest-unifi` | Manually trigger UniFi WiFi client harvest |
 | `GET` | `/unifi/clients` | Get UniFi clients |
 | `GET` | `/unifi/wan` | Get WAN throughput and status |
 | `GET` | `/unifi/wlan` | Get Access Point health and WiFi throughput |
@@ -201,7 +216,6 @@ All endpoints are prefixed with `/api/v1/` and require authentication (JWT cooki
 | `GET` | `/ai/anomalies` | Get latest 24h anomaly analysis |
 | `GET` | `/ai/alert-summary` | Get latest 48h alert triage summary |
 | `POST` | `/ai/identify-device` | Trigger AI identification for a specific device |
-| `GET` | `/ai/models` | Fetch real-time model list from provider |
 
 ---
 
