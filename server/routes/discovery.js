@@ -2,7 +2,10 @@ const db = require('../db/database');
 const {
     safeArpScan,
     safeArpScanAll,
-    isArpScanRunning
+    isArpScanRunning,
+    harvestUnifiWifi,
+    getMacTrackingStats,
+    resetMacTrackingStats
 } = require('../services/discoveryService');
 const { identifyDiscoveredDevice } = require('../services/aiService');
 
@@ -108,6 +111,24 @@ module.exports = async function (fastify, opts) {
 
     fastify.get('/arp-scan/status', async (request, reply) => {
         return reply.send({ running: isArpScanRunning() });
+    });
+
+    fastify.get('/mac-stats', async (request, reply) => {
+        return reply.send(getMacTrackingStats());
+    });
+
+    fastify.post('/mac-stats/reset', async (request, reply) => {
+        resetMacTrackingStats();
+        return reply.send({ reset: true });
+    });
+
+    fastify.post('/harvest-unifi', async (request, reply) => {
+        try {
+            const result = await harvestUnifiWifi();
+            return reply.send({ success: true, ...result });
+        } catch (err) {
+            return reply.code(500).send({ error: true, message: err.message });
+        }
     });
 
     fastify.post('/identify-all', async (request, reply) => {

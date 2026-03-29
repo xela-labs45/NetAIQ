@@ -1,6 +1,6 @@
 const db = require('../db/database');
 const unifiService = require('./unifiService');
-const { lookupMac } = require('./macOuiService');
+const { lookupMac, isRandomisedMac } = require('./macOuiService');
 const pLimit = require('p-limit');
 const ping = require('ping');
 const { Netmask } = require('netmask');
@@ -8,8 +8,26 @@ const { exec } = require('child_process');
 const { promisify } = require('util');
 const execAsync = promisify(exec);
 
-// Concurrency lock for ARP scans
-let arpScanRunning = false;
+// MAC tracking stats for monitoring
+const macTrackingStats = {
+    inserted: 0,
+    updated: 0,
+    ignored: 0,
+    ipChanges: 0,
+    lastReset: Date.now()
+};
+
+function getMacTrackingStats() {
+    return { ...macTrackingStats };
+}
+
+function resetMacTrackingStats() {
+    macTrackingStats.inserted = 0;
+    macTrackingStats.updated = 0;
+    macTrackingStats.ignored = 0;
+    macTrackingStats.ipChanges = 0;
+    macTrackingStats.lastReset = Date.now();
+}
 
 function isArpScanRunning() {
     return arpScanRunning;
@@ -48,14 +66,36 @@ function findSegmentForIp(ip) {
 function upsertDevice(device) {
     // Normalise MAC to lowercase with colons
     const mac = normaliseMac(device.mac);
-    if (!mac) return; // skip invalid MACs
+    if (!mac) {
+        macTrackingStats.ignored++;
+        console.warn(`[Discovery] Skipping device with invalid MAC: ${device.mac} (IP: ${device.ip}, Source: ${device.source})`);
+        return null; // skip invalid MACs
+    }
 
     // Skip link-local and broadcast MACs
-    if (isIgnoredMac(mac)) return;
+    if (isIgnoredMac(mac)) {
+        macTrackingStats.ignored++;
+        console.log(`[Discovery] Ignored MAC (multicast/broadcast): ${mac} (IP: ${device.ip}, Source: ${device.source})`);
+        return null;
+    }
 
-    const existing = db.prepare(`SELECT id FROM discovered_devices WHERE mac_address = ?`).get(mac);
+    // Check for randomized MACs (privacy concern - log for awareness)
+    const isRandomized = isRandomisedMac(mac);
+    if (isRandomized) {
+        console.log(`[Discovery] Detected randomized MAC: ${mac} (IP: ${device.ip}, Source: ${device.source})`);
+    }
+
+    const existing = db.prepare(`SELECT id, last_ip, hostname FROM discovered_devices WHERE mac_address = ?`).get(mac);
 
     if (existing) {
+        // Check for IP change (could indicate roaming or IP conflict)
+        const oldIp = existing.last_ip;
+        const newIp = device.ip || null;
+        if (oldIp && newIp && oldIp !== newIp) {
+            macTrackingStats.ipChanges++;
+            console.log(`[Discovery] MAC ${mac} changed IP: ${oldIp} -> ${newIp} (Source: ${device.source})`);
+        }
+
         // Update last known info but keep first_seen
         db.prepare(`
             UPDATE discovered_devices SET
@@ -72,38 +112,57 @@ function upsertDevice(device) {
             device.source,
             mac
         );
+        macTrackingStats.updated++;
+        return { action: 'updated', mac, id: existing.id };
     } else {
         // New device — insert and do OUI lookup for vendor
         const oui = lookupMac(mac);
 
-        db.prepare(`
-            INSERT INTO discovered_devices
-                (mac_address, last_ip, hostname, is_wired, source, segment_id, vendor)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-        `).run(
-            mac,
-            device.ip || null,
-            device.hostname || null,
-            device.is_wired ?? null,
-            device.source,
-            device.segment_id || null,
-            oui?.manufacturer || null
-        );
+        try {
+            const result = db.prepare(`
+                INSERT INTO discovered_devices
+                    (mac_address, last_ip, hostname, is_wired, source, segment_id, vendor)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            `).run(
+                mac,
+                device.ip || null,
+                device.hostname || null,
+                device.is_wired ?? null,
+                device.source,
+                device.segment_id || null,
+                oui?.manufacturer || null
+            );
+            macTrackingStats.inserted++;
+            console.log(`[Discovery] New device discovered: ${mac} (IP: ${device.ip}, Vendor: ${oui?.manufacturer || 'Unknown'}, Source: ${device.source})`);
+            return { action: 'inserted', mac, id: result.lastInsertRowid };
+        } catch (err) {
+            if (err.message && err.message.includes('UNIQUE constraint failed')) {
+                console.warn(`[Discovery] MAC collision detected: ${mac} - Race condition or normalization issue`);
+                return null;
+            }
+            throw err;
+        }
     }
 }
 
 async function harvestUnifiWifi() {
     const clients = await unifiService.getClients();
-    if (!clients) return { harvested: 0 };
+    if (!clients) return { harvested: 0, inserted: 0, updated: 0 };
 
-    let count = 0;
+    let inserted = 0;
+    let updated = 0;
+    let ignored = 0;
+
     for (const client of clients) {
-        if (!client.mac) continue;
+        if (!client.mac) {
+            ignored++;
+            continue;
+        }
 
         // Find segment_id by matching client IP to segment CIDR
         const segment = findSegmentForIp(client.ip);
 
-        upsertDevice({
+        const result = upsertDevice({
             mac: client.mac,
             ip: client.ip,
             hostname: client.hostname || client.name || null,
@@ -111,10 +170,14 @@ async function harvestUnifiWifi() {
             source: client.is_wired ? 'unifi_wired' : 'unifi_wifi',
             segment_id: segment?.id || null
         });
-        count++;
+
+        if (result?.action === 'inserted') inserted++;
+        else if (result?.action === 'updated') updated++;
+        else ignored++;
     }
 
-    return { harvested: count };
+    console.log(`[Discovery] UniFi harvest: ${inserted} new, ${updated} updated, ${ignored} ignored`);
+    return { harvested: inserted + updated, inserted, updated, ignored };
 }
 
 function parseArpOutput(output) {
@@ -299,5 +362,7 @@ module.exports = {
     safeArpScanAll,
     isArpScanRunning,
     upsertDevice,
-    findSegmentForIp
+    findSegmentForIp,
+    getMacTrackingStats,
+    resetMacTrackingStats
 };
