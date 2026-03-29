@@ -3,6 +3,13 @@ const { z } = require('zod');
 const { pingDevice } = require('../services/pingService');
 const { mergeOnlineDevices, getOnlineCount } = require('../services/mergeService');
 
+function normaliseMac(mac) {
+    if (!mac) return null;
+    const clean = String(mac).replace(/[^a-fA-F0-9]/g, '');
+    if (clean.length !== 12) return mac; // fallback to original if parsing fails
+    return clean.toLowerCase().match(/.{2}/g).join(':');
+}
+
 const deviceSchema = z.object({
     hostname: z.string().optional().nullable(),
     ip_address: z.string().ip({ version: 'v4', message: 'Invalid IPv4 address' }),
@@ -95,14 +102,16 @@ module.exports = async function (fastify, opts) {
                     continue;
                 }
 
+                const normalizedMac = normaliseMac(d.mac);
+
                 // Skip if MAC exists
-                if (d.mac && checkMacStmt.get(d.mac)) {
+                if (normalizedMac && checkMacStmt.get(normalizedMac)) {
                     skipped++;
                     continue;
                 }
 
                 try {
-                    const info = insertStmt.run(d.hostname || null, d.ip, d.mac || null);
+                    const info = insertStmt.run(d.hostname || null, d.ip, normalizedMac);
 
                     const newDevice = db.prepare('SELECT * FROM devices WHERE id = ?').get(info.lastInsertRowid);
                     // Initial ping asynchronously
@@ -134,12 +143,13 @@ module.exports = async function (fastify, opts) {
         const { hostname, ip_address, mac_address, device_type, segment_id, is_critical, notes } = validation.data;
 
         try {
+            const normalizedMac = normaliseMac(mac_address);
             const stmt = db.prepare(`
         INSERT INTO devices (hostname, ip_address, mac_address, device_type, segment_id, is_critical, notes)
         VALUES (?, ?, ?, ?, ?, ?, ?)
       `);
 
-            const info = stmt.run(hostname || null, ip_address, mac_address || null, device_type, segment_id || null, is_critical ? 1 : 0, notes || null);
+            const info = stmt.run(hostname || null, ip_address, normalizedMac || null, device_type, segment_id || null, is_critical ? 1 : 0, notes || null);
 
             const newDevice = db.prepare('SELECT * FROM devices WHERE id = ?').get(info.lastInsertRowid);
 

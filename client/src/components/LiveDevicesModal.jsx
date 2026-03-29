@@ -467,8 +467,8 @@ export default function LiveDevicesModal({ open, onClose, defaultTab = 'all' }) 
                                                     <Typography variant="body2">{d.last_ip}</Typography>
                                                 </TableCell>
                                                 <TableCell align="center">
-                                                    {d.is_wired === 1 && <EthernetIcon fontSize="small" sx={{ color: '#22c55e' }} />}
-                                                    {d.is_wired === 0 && <WifiIcon fontSize="small" sx={{ color: '#06b6d4' }} />}
+                                                    {d.is_wired === true && <EthernetIcon fontSize="small" sx={{ color: '#22c55e' }} />}
+                                                    {d.is_wired === false && <WifiIcon fontSize="small" sx={{ color: '#06b6d4' }} />}
                                                     {d.is_wired === null && <UnknownIcon fontSize="small" color="disabled" />}
                                                 </TableCell>
                                                 <TableCell>
