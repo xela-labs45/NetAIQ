@@ -60,6 +60,14 @@ export function SocketProvider({ children }) {
                 });
             });
 
+            // ARP discovery completion - invalidate device caches to refresh modals
+            newSocket.on('discovery:arp_complete', (data) => {
+                console.log('ARP scan complete, invalidating device caches:', data);
+                queryClient.invalidateQueries({ queryKey: ['liveDevices'] });
+                queryClient.invalidateQueries({ queryKey: ['discoveredDevices'] });
+                queryClient.invalidateQueries({ queryKey: ['devices'] });
+            });
+
             setSocket(newSocket);
 
             return cleanup;
