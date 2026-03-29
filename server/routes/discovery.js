@@ -6,6 +6,9 @@ const {
 } = require('../services/discoveryService');
 const { identifyDiscoveredDevice } = require('../services/aiService');
 
+// Concurrency lock for batch identification
+let identificationRunning = false;
+
 module.exports = async function (fastify, opts) {
     // Protect all routes
     fastify.addHook('preValidation', fastify.authenticate);
@@ -108,6 +111,11 @@ module.exports = async function (fastify, opts) {
     });
 
     fastify.post('/identify-all', async (request, reply) => {
+        // Check if already running
+        if (identificationRunning) {
+            return reply.code(409).send({ error: true, message: 'Identification batch already in progress' });
+        }
+
         // Identify all unidentified devices
         const unidentified = db.prepare(`
       SELECT * FROM discovered_devices WHERE ai_identified = 0
@@ -116,6 +124,8 @@ module.exports = async function (fastify, opts) {
         if (unidentified.length === 0) {
             return reply.send({ started: false, message: 'No unidentified devices found.' });
         }
+
+        identificationRunning = true;
 
         // Run async sequential identification
         setImmediate(async () => {
@@ -143,8 +153,15 @@ module.exports = async function (fastify, opts) {
                     VALUES (?, ?, ?, 'other', 0)
                 `).run(device.hostname || null, device.last_ip, device.mac_address);
                             } catch (e) {
-                                // Probably IP exists for a different MAC. Just skip creating in devices table
-                                // and let the identifyDiscoveredDevice handle it natively via discovered_devices
+                                // Probably IP exists for a different MAC. Log for visibility and let identifyDiscoveredDevice handle it
+                                if (fastify.io) {
+                                    fastify.io.emit('discovery:ip_collision', {
+                                        mac: device.mac_address,
+                                        ip: device.last_ip,
+                                        error: e.message
+                                    });
+                                }
+                                fastify.log.warn(`IP collision for ${device.mac_address}: IP ${device.last_ip} already in use - ${e.message}`);
                             }
                         }
                     }
@@ -159,6 +176,8 @@ module.exports = async function (fastify, opts) {
                     fastify.log.error(`Failed to identify ${device.mac_address}: ${err.message}`);
                 }
             }
+
+            identificationRunning = false;
 
             if (fastify.io) {
                 fastify.io.emit('discovery:identify_complete', {

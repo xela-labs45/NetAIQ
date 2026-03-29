@@ -79,7 +79,7 @@ function getCached(key) {
   }
 
   // DB fallback — survives server restarts
-  const analysisType = key === 'anomalies' ? 'anomaly' : 'alert_triage';
+  const analysisType = key === 'anomalies' || key === 'anomaly' ? 'anomaly' : 'alert_triage';
 
   const dbEntry = db.prepare(`
     SELECT result_json, created_at
@@ -327,11 +327,17 @@ async function fetchModels(provider, apiKey) {
   }
 
   if (provider === 'openrouter') {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 10000);
     try {
       const r = await fetch(
         'https://openrouter.ai/api/v1/models',
-        { headers: { 'Authorization': `Bearer ${apiKey}` } }
+        { 
+          headers: { 'Authorization': `Bearer ${apiKey}` },
+          signal: controller.signal
+        }
       );
+      clearTimeout(timeout);
       if (!r.ok) throw new Error(`OpenRouter HTTP ${r.status}`);
 
       const data = await r.json();
@@ -536,7 +542,13 @@ async function identifyDiscoveredDevice(mac) {
     return result;
   }
 
-  // AI identification
+  // AI identification - check per-MAC rate limit first
+  const macRate = checkRateLimit(`identify_mac_${cleanMac}`, 3, 60000);
+  if (!macRate.allowed) {
+    return { error: true, rateLimited: true, resetIn: macRate.resetIn, message: 'Per-MAC rate limit reached' };
+  }
+
+  // Global cap across all identifications
   const globalRate = checkRateLimit('identify_device_global', 20, 60000);
   if (!globalRate.allowed) {
     return { error: true, rateLimited: true, resetIn: globalRate.resetIn, message: 'Global identification rate limit reached' };
