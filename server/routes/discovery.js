@@ -1,9 +1,9 @@
 const db = require('../db/database');
 const {
-    safeArpScan,
-    safeArpScanAll,
+    checkDiscoveryCapability,
+    arpScanL2Segment,
     isArpScanRunning,
-    harvestUnifiWifi,
+    harvestUnifiClients,
     getMacTrackingStats,
     resetMacTrackingStats
 } = require('../services/discoveryService');
@@ -16,8 +16,17 @@ module.exports = async function (fastify, opts) {
     // Protect all routes
     fastify.addHook('preValidation', fastify.authenticate);
 
+    // ─── Capability Check ───────────────────────────────────────
+    // Returns what discovery tools are available in this environment.
+    // Used by the frontend to show/hide buttons and info messages.
+    fastify.get('/capability', async (request, reply) => {
+        const capability = await checkDiscoveryCapability();
+        return reply.send(capability);
+    });
+
+    // ─── Discovered Devices List ────────────────────────────────
     fastify.get('/discovered', async (request, reply) => {
-        const { segment_id, is_wired, ai_identified, limit = 200, offset = 0 } = request.query;
+        const { segment_id, is_wired, ai_identified, search, limit = 200, offset = 0 } = request.query;
 
         let query = `
       SELECT dd.*, 
@@ -51,6 +60,12 @@ module.exports = async function (fastify, opts) {
             query += ` AND dd.ai_identified = ?`;
             params.push(ai_identified === 'true' || ai_identified === '1' ? 1 : 0);
         }
+        // Search filter: match MAC, IP, or hostname
+        if (search && search.trim()) {
+            query += ` AND (dd.mac_address LIKE ? OR dd.last_ip LIKE ? OR dd.hostname LIKE ?)`;
+            const term = `%${search.trim()}%`;
+            params.push(term, term, term);
+        }
 
         query += ` ORDER BY dd.last_seen DESC LIMIT ? OFFSET ?`;
         params.push(parseInt(limit, 10), parseInt(offset, 10));
@@ -63,6 +78,7 @@ module.exports = async function (fastify, opts) {
         return reply.send({ devices });
     });
 
+    // ─── Discovery Stats ────────────────────────────────────────
     fastify.get('/discovered/stats', async (request, reply) => {
         const total = db.prepare('SELECT count(*) as count FROM discovered_devices').get()?.count || 0;
         const identified = db.prepare('SELECT count(*) as count FROM discovered_devices WHERE ai_identified = 1').get()?.count || 0;
@@ -76,47 +92,62 @@ module.exports = async function (fastify, opts) {
       GROUP BY s.id
     `).all();
 
+        const by_source = db.prepare(`
+      SELECT source, count(*) as count
+      FROM discovered_devices
+      GROUP BY source
+    `).all();
+
         const last_harvest = db.prepare('SELECT last_seen FROM discovered_devices ORDER BY last_seen DESC LIMIT 1').get()?.last_seen || null;
 
         return reply.send({
             total,
             identified,
+            unidentified: total - identified,
             wired,
             wireless,
             by_segment,
+            by_source,
             last_harvest
         });
     });
 
-    fastify.post('/arp-scan/all', async (request, reply) => {
-        try {
-            // Run async
-            safeArpScanAll(fastify).catch(err => {
-                fastify.log.error(`ARP Scan All failed: ${err.message}`);
+    // ─── ARP Scan (L2 only, auto-detected) ──────────────────────
+    // No segmentId needed — always scans the server's own L2 segment.
+    fastify.post('/arp-scan', async (request, reply) => {
+        // Pre-check capability
+        const capability = await checkDiscoveryCapability();
+        if (!capability.can_arp_scan) {
+            return reply.code(503).send({
+                error: true,
+                message: capability.platform_note || 'ARP scan not available in this environment'
             });
-            return reply.code(202).send({ started: true });
-        } catch (err) {
-            return reply.code(409).send({ error: true, message: err.message });
         }
+
+        if (isArpScanRunning()) {
+            return reply.code(409).send({ error: true, message: 'ARP scan already in progress' });
+        }
+
+        // Run async — return 202 immediately
+        setImmediate(() => {
+            arpScanL2Segment(fastify.io).catch(err => {
+                fastify.log.error(`ARP Scan failed: ${err.message}`);
+            });
+        });
+
+        return reply.code(202).send({
+            started: true,
+            cidr: capability.l2_segment?.cidr,
+            segment: capability.l2_segment?.segment
+        });
     });
 
-    fastify.post('/arp-scan/:segmentId', async (request, reply) => {
-        try {
-            const { segmentId } = request.params;
-            // Run async
-            safeArpScan(segmentId, fastify).catch(err => {
-                fastify.log.error(`ARP Scan on segment ${segmentId} failed: ${err.message}`);
-            });
-            return reply.code(202).send({ started: true, segment_id: segmentId });
-        } catch (err) {
-            return reply.code(409).send({ error: true, message: err.message });
-        }
-    });
-
-    fastify.get('/arp-scan/status', async (request, reply) => {
+    // ─── ARP Scan Status ────────────────────────────────────────
+    fastify.get('/arp-status', async (request, reply) => {
         return reply.send({ running: isArpScanRunning() });
     });
 
+    // ─── MAC Tracking Stats ─────────────────────────────────────
     fastify.get('/mac-stats', async (request, reply) => {
         return reply.send(getMacTrackingStats());
     });
@@ -126,25 +157,26 @@ module.exports = async function (fastify, opts) {
         return reply.send({ reset: true });
     });
 
+    // ─── UniFi Harvest (manual trigger) ─────────────────────────
+    // Fetches all active WiFi clients + historical users from UniFi API.
     fastify.post('/harvest-unifi', async (request, reply) => {
         try {
-            const result = await harvestUnifiWifi();
+            const result = await harvestUnifiClients();
             return reply.send({ success: true, ...result });
         } catch (err) {
             return reply.code(500).send({ error: true, message: err.message });
         }
     });
 
+    // ─── Batch AI Identification ────────────────────────────────
     fastify.post('/identify-all', async (request, reply) => {
-        // Check if already running
         if (identificationRunning) {
             return reply.code(409).send({ error: true, message: 'Identification batch already in progress' });
         }
 
-        // Identify all unidentified devices
-        const unidentified = db.prepare(`
-      SELECT * FROM discovered_devices WHERE ai_identified = 0
-    `).all();
+        const unidentified = db.prepare(
+            'SELECT * FROM discovered_devices WHERE ai_identified = 0'
+        ).all();
 
         if (unidentified.length === 0) {
             return reply.send({ started: false, message: 'No unidentified devices found.' });
@@ -152,7 +184,6 @@ module.exports = async function (fastify, opts) {
 
         identificationRunning = true;
 
-        // Run async sequential identification
         setImmediate(async () => {
             let count = 0;
             for (const device of unidentified) {
@@ -165,20 +196,16 @@ module.exports = async function (fastify, opts) {
                         });
                     }
 
-                    // Ensure it exists in devices table as requested by spec
-                    // For discovered_devices not yet in devices table, auto-create a minimal entry
+                    // Ensure device exists in devices table for AI identification
                     const exists = db.prepare('SELECT id FROM devices WHERE mac_address = ?').get(device.mac_address);
                     if (!exists) {
-                        // Must have IP to insert into devices
                         if (device.last_ip) {
-                            // Ignore unique constraint error if IP already used by another device
                             try {
                                 db.prepare(`
-                    INSERT INTO devices (hostname, ip_address, mac_address, device_type, is_critical)
-                    VALUES (?, ?, ?, 'other', 0)
-                `).run(device.hostname || null, device.last_ip, device.mac_address);
+                                    INSERT INTO devices (hostname, ip_address, mac_address, device_type, is_critical)
+                                    VALUES (?, ?, ?, 'other', 0)
+                                `).run(device.hostname || null, device.last_ip, device.mac_address);
                             } catch (e) {
-                                // Probably IP exists for a different MAC. Log for visibility and let identifyDiscoveredDevice handle it
                                 if (fastify.io) {
                                     fastify.io.emit('discovery:ip_collision', {
                                         mac: device.mac_address,
@@ -186,16 +213,15 @@ module.exports = async function (fastify, opts) {
                                         error: e.message
                                     });
                                 }
-                                fastify.log.warn(`IP collision for ${device.mac_address}: IP ${device.last_ip} already in use - ${e.message}`);
+                                fastify.log.warn(`IP collision for ${device.mac_address}: ${e.message}`);
                             }
                         }
                     }
 
-                    // Now identify
                     await identifyDiscoveredDevice(device.mac_address);
                     count++;
 
-                    // Wait 3 seconds between calls to not hammer the AI API
+                    // Wait 3s between calls to not hammer the AI API
                     await new Promise(r => setTimeout(r, 3000));
                 } catch (err) {
                     fastify.log.error(`Failed to identify ${device.mac_address}: ${err.message}`);

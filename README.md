@@ -159,7 +159,14 @@ The AI Insights feature is optional and allows NetMon to automatically identify 
 - **Anomaly Detection**: NetMon analyzes the last 24h of ping logs every 10 minutes to find latency patterns.
 - **Alert Triage**: Automatically groups recent alerts into logical patterns with recommended actions. Runs efficiently by saving tokens when no new alerts have occurred.
 
-### 4. MAC Tracking & Deduplication
+### 4. Universal Device Discovery
+NetMon features a non-hardcoded, dual-source discovery system to find and track network devices:
+- **UniFi Harvest**: Connects to your UniFi Controller to harvest active WiFi/Wired clients and up to 4 weeks of historical device data. Works on all platforms.
+- **ARP Scanning**: An L2-segment-aware `nmap` ARP scanner. It auto-detects the server's own Local Area Network segment and scans for wired devices using raw sockets, with fallbacks to `ip neigh` and `arp -a`.
+  - **Linux / Docker Note**: ARP scanning requires the `NET_RAW` and `NET_ADMIN` capabilities in `docker-compose.yml`. The container runs as the non-root `node` user, but uses `setcap` to grant `nmap` the permissions to send raw ARP packets.
+  - **Mac / Windows Docker Desktop**: ARP scanning is not available due to how Docker handles virtualization networking limits on these platforms. Discovery will automatically fall back to relying entirely on the UniFi Harvest.
+
+### 5. MAC Tracking & Deduplication
 NetMon tracks discovered devices with intelligent MAC address handling:
 - **Normalization**: MACs are stored in a consistent lowercase format with colons
 - **Duplicate Prevention**: Duplicate MACs are automatically detected and updated rather than re-inserted
@@ -203,10 +210,12 @@ All endpoints are prefixed with `/api/v1/` and require authentication (JWT cooki
 | `PUT` | `/alerts/read-all` | Mark all alerts as read |
 | `GET` | `/discovered-devices` | List discovered devices from ARP scans |
 | `GET` | `/discovered-devices/:id` | Get single discovered device details |
-| `POST` | `/discovery/arp-scan` | Start ARP scan on a segment |
+| `GET` | `/discovery/capability` | Check which discovery tools are available in the current environment |
+| `POST` | `/discovery/arp-scan` | Start ARP scan on the auto-detected L2 segment |
+| `GET` | `/discovery/arp-status` | Check if an ARP scan is currently running |
 | `GET` | `/discovery/mac-stats` | Get MAC tracking statistics (inserted, updated, ignored, IP changes) |
 | `POST` | `/discovery/mac-stats/reset` | Reset MAC tracking statistics |
-| `POST` | `/discovery/harvest-unifi` | Manually trigger UniFi WiFi client harvest |
+| `POST` | `/discovery/harvest-unifi` | Trigger UniFi WiFi/Wired and historical client harvest |
 | `GET` | `/unifi/clients` | Get UniFi clients |
 | `GET` | `/unifi/wan` | Get WAN throughput and status |
 | `GET` | `/unifi/wlan` | Get Access Point health and WiFi throughput |

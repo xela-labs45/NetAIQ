@@ -10,6 +10,16 @@ services:
     # ports:
     #   - "3001:3001"
 
+    # NET_RAW and NET_ADMIN are required for ARP-based
+    # MAC discovery on the local L2 segment.
+    # These capabilities are safe — they only allow
+    # the container to send/receive raw network packets
+    # on the host network. Remove if not using MAC
+    # discovery on Linux hosts.
+    cap_add:
+      - NET_RAW
+      - NET_ADMIN
+
     volumes:
       - ./data:/app/data # persist SQLite DB
       - ./server/public:/app/server/public # host build is reflected in the container

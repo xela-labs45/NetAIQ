@@ -17,7 +17,7 @@ RUN cd client && npm install
 COPY . .
 
 # Build the frontend (outputs to client/dist, which we'll configure Vite to output directly to server/public or we copy it)
-# By default Vite outputs to dist, let's just make it output to server/public
+# By default Vite outputs to dist, let's make it output to server/public
 RUN npm run build
 
 # Production image
@@ -26,6 +26,22 @@ FROM node:20-alpine
 # Set environment
 ENV NODE_ENV=production
 ENV PORT=3001
+
+# Networking tools for MAC discovery
+# nmap:     ARP scan for L2 device discovery
+# iproute2: ip neigh fallback ARP cache reader
+# net-tools: arp -a legacy fallback
+# libcap:   setcap to grant nmap raw socket capability without root
+RUN apk add --no-cache \
+    nmap \
+    iproute2 \
+    net-tools \
+    libcap
+
+# Grant nmap the raw socket capabilities it needs so the
+# non-root 'node' user can perform ARP scans.
+# This avoids running the entire container as root.
+RUN setcap cap_net_raw,cap_net_admin+eip /usr/bin/nmap
 
 WORKDIR /app
 

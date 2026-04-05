@@ -80,6 +80,14 @@ export default function LiveDevicesModal({ open, onClose, defaultTab = 'all' }) 
         enabled: open
     });
 
+    // Discovery capability — controls info banners
+    const { data: capability } = useQuery({
+        queryKey: ['discoveryCapability'],
+        queryFn: () => axios.get('/api/v1/discovery/capability').then(res => res.data),
+        enabled: open && mainTab === 'discovered',
+        staleTime: 5 * 60 * 1000
+    });
+
     // Handle deep linking from Dashboard cards where defaultTab controls both mainTab and connectionFilter
     useEffect(() => {
         if (open) {
@@ -249,7 +257,9 @@ export default function LiveDevicesModal({ open, onClose, defaultTab = 'all' }) 
         });
     }, [searchedDiscoveredDevices, discSortBy, discSortDir]);
 
-    const discoveredUnidentifiedCount = discoveredDevicesRaw.filter(d => d.ai_identified === 0).length;
+    const discoveredUnidentifiedCount = discoveredDevicesRaw.filter(d => d.ai_identified === false).length;
+    const discoveredWiredCount = discoveredDevicesRaw.filter(d => d.is_wired === true).length;
+    const discoveredWifiCount = discoveredDevicesRaw.filter(d => d.is_wired === false).length;
 
     // ==========================================
     // HELPERS
@@ -271,6 +281,7 @@ export default function LiveDevicesModal({ open, onClose, defaultTab = 'all' }) 
         switch (source) {
             case 'unifi_wired': return { label: 'UniFi Wired', color: 'success' };
             case 'unifi_wifi': return { label: 'UniFi WiFi', color: 'info' };
+            case 'unifi_historical': return { label: 'UniFi History', sx: { bgcolor: '#6b7280', color: 'white' } };
             case 'arp_scan': return { label: 'ARP Scan', color: 'secondary' };
             case 'ping': return { label: 'Ping', sx: { bgcolor: '#4b5563', color: 'white' } };
             default: return { label: source || 'Unknown', variant: 'outlined' };
@@ -417,7 +428,19 @@ export default function LiveDevicesModal({ open, onClose, defaultTab = 'all' }) 
 
                     {/* DISCOVERED TAB RENDER */}
                     {mainTab === 'discovered' && (
-                        (discoveredLoading) ? (
+                        <>
+                        {/* Capability info banner */}
+                        {capability && (
+                            <Box sx={{ px: 2, py: 1, bgcolor: capability.can_arp_scan ? 'rgba(34,197,94,0.08)' : 'rgba(245,158,11,0.08)', borderBottom: 1, borderColor: 'divider' }}>
+                                <Typography variant="caption" sx={{ color: capability.can_arp_scan ? '#22c55e' : '#f59e0b' }}>
+                                    {capability.can_arp_scan
+                                        ? `MAC discovery active · L2 segment ${capability.l2_segment?.cidr || 'detected'} · WiFi via UniFi`
+                                        : `WiFi MACs via UniFi only${capability.platform_note ? ' · ' + capability.platform_note : ''}`
+                                    }
+                                </Typography>
+                            </Box>
+                        )}
+                        {(discoveredLoading) ? (
                             <Box sx={{ display: 'flex', justifyContent: 'center', p: 4 }}><CircularProgress /></Box>
                         ) : (
                             <Table stickyHeader size="small">
@@ -529,7 +552,8 @@ export default function LiveDevicesModal({ open, onClose, defaultTab = 'all' }) 
                                 </TableBody>
                             </Table>
                         )
-                    )}
+                    }
+                    </> )}
                 </DialogContent>
 
                 <DialogActions sx={{ justifyContent: 'space-between', p: 2, borderTop: 1, borderColor: 'divider', bgcolor: 'rgba(0,0,0,0.2)' }}>
@@ -545,7 +569,7 @@ export default function LiveDevicesModal({ open, onClose, defaultTab = 'all' }) 
                     ) : (
                         <>
                             <Typography variant="body2" color="text.secondary">
-                                Showing {searchedDiscoveredDevices.length} of {discoveredDevicesRaw.length} total · {discoveredDevicesRaw.length - discoveredUnidentifiedCount} identified
+                                {discoveredDevicesRaw.length} devices ever seen · {discoveredWifiCount} WiFi · {discoveredWiredCount} wired · {discoveredUnidentifiedCount} pending identification
                             </Typography>
                             <Button
                                 variant="outlined"

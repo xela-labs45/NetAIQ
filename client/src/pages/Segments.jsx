@@ -2,12 +2,14 @@ import React, { useState, useEffect } from 'react';
 import {
   Box, Typography, Button, Dialog, DialogTitle, DialogContent,
   DialogActions, TextField, Grid, Card, LinearProgress, Accordion,
-  AccordionSummary, AccordionDetails, Chip, CircularProgress
+  AccordionSummary, AccordionDetails, Chip, CircularProgress, Tooltip,
+  Alert
 } from '@mui/material';
 import {
   Add as AddIcon, ExpandMore as ExpandMoreIcon,
   WifiTethering as ScanIcon, Delete as DeleteIcon,
-  Fingerprint as ArpIcon, TravelExplore as ExploreIcon
+  Fingerprint as ArpIcon, CloudSync as CloudSyncIcon,
+  InfoOutlined as InfoIcon, WarningAmber as WarningIcon
 } from '@mui/icons-material';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import axios from 'axios';
@@ -23,8 +25,15 @@ export default function Segments() {
   const [localScans, setLocalScans] = useState({});
 
   // ARP Discovery state
-  const [arpProgress, setArpProgress] = useState({}); // { [segmentId]: { pinged, total, resultText } }
-  const [isArpScanningAll, setIsArpScanningAll] = useState(false);
+  const [arpProgress, setArpProgress] = useState(null); // { stage, cidr, status, macs_found }
+  const [unifiSyncing, setUnifiSyncing] = useState(false);
+
+  // Fetch discovery capability to determine what to show
+  const { data: capability } = useQuery({
+    queryKey: ['discoveryCapability'],
+    queryFn: () => axios.get('/api/v1/discovery/capability').then(res => res.data),
+    staleTime: 5 * 60 * 1000 // match backend cache
+  });
 
   useEffect(() => {
     if (socket) {
@@ -42,7 +51,6 @@ export default function Segments() {
           return newState;
         });
         queryClient.invalidateQueries(['segments']);
-        // Auto-refresh the expanded scans if it's currently open
         if (expandedScans[data.segment_id]) {
           fetchScans(data.segment_id).then(scans => {
             setLocalScans(prev => ({ ...prev, [data.segment_id]: scans }));
@@ -51,47 +59,30 @@ export default function Segments() {
       };
 
       const handleArpStarted = (data) => {
-        setArpProgress(prev => ({
-          ...prev,
-          [data.segment_id]: { pinged: 0, total: data.total_ips, status: 'running' }
-        }));
+        setArpProgress({ status: 'running', stage: 'started', cidr: data.cidr, segment: data.segment, segment_id: data.segment_id });
       };
 
-      const handleArpProgress = (data) => {
-        setArpProgress(prev => ({
-          ...prev,
-          [data.segment_id]: { pinged: data.pinged, total: data.total, status: 'running' }
-        }));
+      const handleArpProgressUpdate = (data) => {
+        setArpProgress(prev => prev ? { ...prev, stage: data.stage } : null);
       };
 
       const handleArpComplete = (data) => {
-        setArpProgress(prev => ({
-          ...prev,
-          [data.segment_id]: { ...prev[data.segment_id], status: 'complete', resultText: `${data.macs_found} devices discovered` }
-        }));
+        setArpProgress({ status: 'complete', cidr: data.cidr, segment: data.segment, segment_id: data.segment_id, macs_found: data.macs_found });
         // Auto-clear after 10s
-        setTimeout(() => {
-          setArpProgress(prev => {
-            const newState = { ...prev };
-            delete newState[data.segment_id];
-            // If scanning all and all are done, reset master flag
-            if (Object.keys(newState).length === 0) setIsArpScanningAll(false);
-            return newState;
-          });
-        }, 10000);
+        setTimeout(() => { setArpProgress(null); }, 10000);
       };
 
       socket.on('scan:progress', handleProgress);
       socket.on('scan:complete', handleComplete);
       socket.on('discovery:arp_started', handleArpStarted);
-      socket.on('discovery:arp_progress', handleArpProgress);
+      socket.on('discovery:arp_progress', handleArpProgressUpdate);
       socket.on('discovery:arp_complete', handleArpComplete);
 
       return () => {
         socket.off('scan:progress', handleProgress);
         socket.off('scan:complete', handleComplete);
         socket.off('discovery:arp_started', handleArpStarted);
-        socket.off('discovery:arp_progress', handleArpProgress);
+        socket.off('discovery:arp_progress', handleArpProgressUpdate);
         socket.off('discovery:arp_complete', handleArpComplete);
       };
     }
@@ -125,21 +116,26 @@ export default function Segments() {
     }
   };
 
-  const handleArpScan = async (id) => {
+  // ARP scan — always targets the auto-detected L2 segment
+  const handleArpScan = async () => {
     try {
-      await axios.post(`/api/v1/discovery/arp-scan/${id}`);
+      await axios.post('/api/v1/discovery/arp-scan');
     } catch (err) {
       alert(err.response?.data?.message || 'Failed to start ARP discovery');
     }
   };
 
-  const handleArpScanAll = async () => {
+  // Manual UniFi harvest
+  const handleUnifiSync = async () => {
     try {
-      setIsArpScanningAll(true);
-      await axios.post('/api/v1/discovery/arp-scan/all');
+      setUnifiSyncing(true);
+      const res = await axios.post('/api/v1/discovery/harvest-unifi');
+      const data = res.data;
+      alert(`UniFi Sync complete: ${data.wifi || 0} WiFi, ${data.wired || 0} wired, ${data.historical || 0} historical`);
     } catch (err) {
-      setIsArpScanningAll(false);
-      alert(err.response?.data?.message || 'Failed to start full ARP discovery');
+      alert(err.response?.data?.message || 'Failed to sync UniFi clients');
+    } finally {
+      setUnifiSyncing(false);
     }
   };
 
@@ -172,21 +168,29 @@ export default function Segments() {
   };
 
   const segments = segmentsData?.segments || [];
+  const l2SegmentId = capability?.l2_segment?.segment_id;
+
+  // Helper: check if a given segment is the server's L2 segment
+  const isL2Segment = (segId) => l2SegmentId != null && segId === l2SegmentId;
 
   return (
     <Box>
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
         <Typography variant="h4" fontWeight="bold">Network Segments</Typography>
         <Box sx={{ display: 'flex', gap: 2 }}>
-          <Button
-            variant="outlined"
-            color="secondary"
-            startIcon={<ExploreIcon />}
-            onClick={handleArpScanAll}
-            disabled={isArpScanningAll || Object.values(arpProgress).some(p => p.status === 'running')}
-          >
-            Discover All Segments
-          </Button>
+          {capability?.can_unifi_harvest && (
+            <Tooltip title="Fetch all WiFi clients and historically seen devices from UniFi API">
+              <Button
+                variant="outlined"
+                color="primary"
+                startIcon={<CloudSyncIcon />}
+                onClick={handleUnifiSync}
+                disabled={unifiSyncing}
+              >
+                {unifiSyncing ? 'Syncing...' : 'Sync UniFi'}
+              </Button>
+            </Tooltip>
+          )}
           <Button variant="contained" startIcon={<AddIcon />} onClick={handleOpenAdd}>
             Add Segment
           </Button>
@@ -202,7 +206,16 @@ export default function Segments() {
               <Card sx={{ p: 3, borderTop: `4px solid ${seg.color || '#3b82f6'}` }}>
                 <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 2 }}>
                   <Box>
-                    <Typography variant="h6" fontWeight="bold">{seg.name}</Typography>
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                      <Typography variant="h6" fontWeight="bold">{seg.name}</Typography>
+                      {isL2Segment(seg.id) && (
+                        <Chip
+                          size="small"
+                          label="L2"
+                          sx={{ bgcolor: 'rgba(139, 92, 246, 0.15)', color: '#a78bfa', fontWeight: 600, fontSize: '0.65rem', height: 20 }}
+                        />
+                      )}
+                    </Box>
                     <Typography variant="body2" color="text.secondary" fontFamily="monospace">
                       {seg.cidr}
                     </Typography>
@@ -231,6 +244,7 @@ export default function Segments() {
                   <Typography variant="body2" fontWeight="bold" color="success.main">{seg.devices_up}</Typography>
                 </Box>
 
+                {/* ICMP Scan progress */}
                 {scanProgress[seg.id] && (
                   <Box sx={{ mb: 2 }}>
                     <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.5 }}>
@@ -244,25 +258,27 @@ export default function Segments() {
                   </Box>
                 )}
 
-                {arpProgress[seg.id] && (
+                {/* ARP scan progress — only on the L2 segment card */}
+                {isL2Segment(seg.id) && arpProgress && (
                   <Box sx={{ mb: 2, p: 1, bgcolor: 'rgba(156, 39, 176, 0.05)', borderRadius: 1, border: '1px solid rgba(156, 39, 176, 0.2)' }}>
                     <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.5 }}>
                       <Typography variant="caption" color="secondary">
-                        {arpProgress[seg.id].status === 'running' ? 'ARP Discovery...' : arpProgress[seg.id].resultText}
+                        {arpProgress.status === 'running'
+                          ? `ARP Discovery (${arpProgress.stage === 'nmap_running' ? 'nmap scanning...' : arpProgress.stage === 'ip_neigh' ? 'reading ARP cache...' : 'scanning...'})`
+                          : `${arpProgress.macs_found} devices discovered`
+                        }
                       </Typography>
-                      {arpProgress[seg.id].status === 'running' && (
-                        <Typography variant="caption" color="secondary">{arpProgress[seg.id].pinged} / {arpProgress[seg.id].total} IPs</Typography>
-                      )}
                     </Box>
                     <LinearProgress
                       color="secondary"
-                      variant={arpProgress[seg.id].status === 'running' ? 'determinate' : 'determinate'}
-                      value={arpProgress[seg.id].status === 'running' ? (arpProgress[seg.id].pinged / arpProgress[seg.id].total) * 100 : 100}
+                      variant={arpProgress.status === 'running' ? 'indeterminate' : 'determinate'}
+                      value={arpProgress.status === 'complete' ? 100 : 0}
                     />
                   </Box>
                 )}
 
                 <Box sx={{ display: 'flex', gap: 1, mb: 1 }}>
+                  {/* ICMP Scan button — always available */}
                   <Button
                     variant="outlined"
                     fullWidth
@@ -272,20 +288,53 @@ export default function Segments() {
                   >
                     {scanProgress[seg.id] ? 'Scanning...' : 'Scan Now'}
                   </Button>
-                  <Button
-                    variant="outlined"
-                    color="secondary"
-                    fullWidth
-                    startIcon={<ArpIcon />}
-                    disabled={!!arpProgress[seg.id] && arpProgress[seg.id]?.status === 'running'}
-                    onClick={() => handleArpScan(seg.id)}
-                  >
-                    {arpProgress[seg.id]?.status === 'running' ? 'Discovering...' : 'Discover MACs'}
-                  </Button>
+
+                  {/* ARP Discover MACs button — only on the L2 segment */}
+                  {isL2Segment(seg.id) && (
+                    capability?.can_arp_scan ? (
+                      <Tooltip title="ARP scan to discover MAC addresses of wired devices on this segment">
+                        <Button
+                          variant="outlined"
+                          color="secondary"
+                          fullWidth
+                          startIcon={<ArpIcon />}
+                          disabled={arpProgress?.status === 'running'}
+                          onClick={handleArpScan}
+                        >
+                          {arpProgress?.status === 'running' ? 'Discovering...' : 'Discover MACs'}
+                        </Button>
+                      </Tooltip>
+                    ) : (
+                      <Tooltip title={capability?.platform_note || 'ARP scanning not available'}>
+                        <Chip
+                          icon={<WarningIcon />}
+                          label="ARP unavailable"
+                          color="warning"
+                          variant="outlined"
+                          sx={{ height: 36, flex: 1 }}
+                        />
+                      </Tooltip>
+                    )
+                  )}
+
+                  {/* Non-L2 segments: info chip */}
+                  {!isL2Segment(seg.id) && (
+                    <Tooltip title="This segment is on a different Layer 2 network from the NetMon server. Wired device MACs cannot be discovered via ARP across network boundaries. WiFi device MACs are available through the UniFi API.">
+                      <Chip
+                        icon={<InfoIcon />}
+                        label="WiFi MACs via UniFi"
+                        variant="outlined"
+                        sx={{ height: 36, flex: 1, color: 'text.secondary', borderColor: 'divider' }}
+                      />
+                    </Tooltip>
+                  )}
                 </Box>
-                <Typography variant="caption" color="warning.main" sx={{ display: 'block', mb: 2, textAlign: 'center', fontSize: '0.65rem' }}>
-                  ARP scan sends traffic to all IPs. Use manually — not for scheduling.
-                </Typography>
+
+                {isL2Segment(seg.id) && capability?.can_arp_scan && (
+                  <Typography variant="caption" color="warning.main" sx={{ display: 'block', mb: 2, textAlign: 'center', fontSize: '0.65rem' }}>
+                    ARP scan sends traffic to all IPs. Use manually — not for scheduling.
+                  </Typography>
+                )}
 
                 <Accordion expanded={!!expandedScans[seg.id]} onChange={() => toggleScans(seg.id)} sx={{ bgcolor: 'rgba(255,255,255,0.03)', boxShadow: 'none' }}>
                   <AccordionSummary expandIcon={<ExpandMoreIcon />}>

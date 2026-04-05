@@ -141,6 +141,21 @@ const start = async () => {
     const { startCleanupJobs } = require('./jobs/cleanupJob');
     startCleanupJobs();
 
+    // Log discovery capabilities on startup
+    const { checkDiscoveryCapability } = require('./services/discoveryService');
+    checkDiscoveryCapability().then(cap => {
+      fastify.log.info({
+        msg: 'Discovery capability check',
+        arp_scan: cap.can_arp_scan,
+        unifi_harvest: cap.can_unifi_harvest,
+        l2_segment: cap.l2_segment?.cidr || 'none',
+        nmap: cap.nmap_available,
+        note: cap.platform_note || 'all tools available'
+      });
+    }).catch(err => {
+      fastify.log.warn(`Discovery capability check failed: ${err.message}`);
+    });
+
 
   } catch (err) {
     fastify.log.error(err);

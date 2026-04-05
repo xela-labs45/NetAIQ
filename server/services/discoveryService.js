@@ -1,12 +1,30 @@
+/**
+ * discoveryService.js
+ * 
+ * MAC address discovery via two sources:
+ *   1) UniFi API — all WiFi + UniFi-seen wired clients (+ historical)
+ *   2) nmap ARP scan — L2 segment only, auto-detected from server IP
+ * 
+ * ARP scanning only works on the server's own L2 segment because ARP
+ * is a Layer 2 protocol and cannot cross router/L3 boundaries.
+ * The L2 segment is auto-detected at runtime from OS network interfaces
+ * matched against configured segments in the database.
+ * 
+ * Tool priority for ARP: nmap (primary) → ip neigh (supplement) → arp -a (fallback)
+ */
+
 const db = require('../db/database');
 const unifiService = require('./unifiService');
+const settingsService = require('./settingsService');
 const { lookupMac, isRandomisedMac } = require('./macOuiService');
-const pLimit = require('p-limit');
-const ping = require('ping');
 const { Netmask } = require('netmask');
+const os = require('os');
 const { exec } = require('child_process');
 const { promisify } = require('util');
 const execAsync = promisify(exec);
+
+// ─── State ──────────────────────────────────────────────────────────
+let arpScanRunning = false;
 
 // MAC tracking stats for monitoring
 const macTrackingStats = {
@@ -16,8 +34,6 @@ const macTrackingStats = {
     ipChanges: 0,
     lastReset: Date.now()
 };
-
-let arpScanRunning = false;
 
 function getMacTrackingStats() {
     return { ...macTrackingStats };
@@ -34,6 +50,8 @@ function resetMacTrackingStats() {
 function isArpScanRunning() {
     return arpScanRunning;
 }
+
+// ─── MAC Helpers ────────────────────────────────────────────────────
 
 function normaliseMac(mac) {
     if (!mac) return null;
@@ -53,44 +71,210 @@ function isIgnoredMac(mac) {
     return ignored.includes(mac) || (firstByte & 0x01) !== 0;
 }
 
-// Match an IP to a configured segment by CIDR
+// ─── Segment Helpers ────────────────────────────────────────────────
+
+/**
+ * Match an IP to a configured segment by CIDR.
+ */
 function findSegmentForIp(ip) {
+    if (!ip) return null;
     const segments = db.prepare('SELECT * FROM segments').all();
     for (const seg of segments) {
         try {
             const block = new Netmask(seg.cidr);
             if (block.contains(ip)) return seg;
-        } catch { }
+        } catch { /* invalid CIDR, skip */ }
     }
     return null;
 }
 
+/**
+ * Convert IP + netmask to CIDR notation.
+ * e.g. (192.168.1.5, 255.255.255.0) → "192.168.1.0/24"
+ */
+function ipToCidr(ip, netmask) {
+    const ipParts = ip.split('.').map(Number);
+    const maskParts = netmask.split('.').map(Number);
+    // Count bits in netmask
+    const bits = maskParts.reduce((acc, part) => {
+        return acc + part.toString(2).split('').filter(b => b === '1').length;
+    }, 0);
+    // Compute network address
+    const network = ipParts.map((p, i) => p & maskParts[i]);
+    return `${network.join('.')}/${bits}`;
+}
+
+/**
+ * Auto-detect the server's L2 segment by reading OS network interfaces
+ * and matching against configured segments in the database.
+ * 
+ * Priority: skip loopback, skip Docker bridge (172.x), skip link-local (169.254.x).
+ * Prefer interfaces whose IP falls within a configured segment.
+ */
+function getServerL2Segment() {
+    const interfaces = os.networkInterfaces();
+    const segments = db.prepare('SELECT * FROM segments').all();
+
+    for (const [name, addrs] of Object.entries(interfaces)) {
+        // Skip loopback
+        if (name === 'lo') continue;
+
+        for (const addr of (addrs || [])) {
+            // IPv4 only
+            if (addr.family !== 'IPv4') continue;
+            if (addr.internal) continue;
+            // Skip Docker bridge ranges
+            if (addr.address.startsWith('172.')) continue;
+            // Skip link-local
+            if (addr.address.startsWith('169.254.')) continue;
+
+            // Check if this IP falls within a configured segment
+            for (const segment of segments) {
+                try {
+                    const block = new Netmask(segment.cidr);
+                    if (block.contains(addr.address)) {
+                        return {
+                            ip: addr.address,
+                            cidr: segment.cidr,
+                            segment_id: segment.id,
+                            segment: segment.name,
+                            interface: name,
+                            netmask: addr.netmask
+                        };
+                    }
+                } catch { continue; }
+            }
+
+            // Not in any configured segment but still a valid LAN IP —
+            // return it as best-guess with auto-detected CIDR
+            const cidr = ipToCidr(addr.address, addr.netmask);
+            return {
+                ip: addr.address,
+                cidr,
+                segment_id: null,
+                segment: 'Auto-detected',
+                interface: name,
+                netmask: addr.netmask
+            };
+        }
+    }
+    return null;  // could not detect
+}
+
+// ─── Capability Detection ───────────────────────────────────────────
+
+let capabilityCache = null;
+
+/**
+ * Runtime check of what discovery tools are available in this environment.
+ * Results are cached for 5 minutes.
+ */
+async function checkDiscoveryCapability() {
+    if (capabilityCache) return capabilityCache;
+
+    const capability = {
+        nmap_available: false,
+        ip_neigh_available: false,
+        arp_available: false,
+        l2_segment_detected: false,
+        l2_segment: null,
+        unifi_available: false,
+        // Overall capability summary
+        can_arp_scan: false,
+        can_unifi_harvest: false,
+        platform_note: null
+    };
+
+    // Check nmap
+    try {
+        await execAsync('nmap --version');
+        capability.nmap_available = true;
+    } catch {
+        capability.nmap_available = false;
+    }
+
+    // Check ip neigh
+    try {
+        await execAsync('ip neigh show');
+        capability.ip_neigh_available = true;
+    } catch {
+        capability.ip_neigh_available = false;
+    }
+
+    // Check arp
+    try {
+        await execAsync('arp -a');
+        capability.arp_available = true;
+    } catch {
+        capability.arp_available = false;
+    }
+
+    // Detect L2 segment
+    const l2 = getServerL2Segment();
+    if (l2) {
+        capability.l2_segment_detected = true;
+        capability.l2_segment = l2;
+    }
+
+    // Check UniFi
+    const unifiUrl = settingsService.get('unifi_url');
+    const unifiUser = settingsService.get('unifi_username');
+    const unifiPass = settingsService.get('unifi_password');
+    capability.unifi_available = !!(unifiUrl && unifiUser && unifiPass);
+
+    // Derive overall capability
+    capability.can_arp_scan = (
+        capability.nmap_available ||
+        capability.ip_neigh_available ||
+        capability.arp_available
+    ) && capability.l2_segment_detected;
+
+    capability.can_unifi_harvest = capability.unifi_available;
+
+    // Platform note for UI
+    if (!capability.nmap_available && !capability.ip_neigh_available) {
+        capability.platform_note =
+            'ARP tools not available in this environment. ' +
+            'MAC discovery limited to UniFi API data. ' +
+            'On Linux: ensure NET_RAW capability is set in docker-compose.yml.';
+    } else if (!capability.l2_segment_detected) {
+        capability.platform_note =
+            'Server L2 segment could not be detected. ' +
+            'Ensure at least one network segment is configured in the Segments page.';
+    }
+
+    // Cache for 5 minutes
+    capabilityCache = capability;
+    setTimeout(() => { capabilityCache = null; }, 5 * 60 * 1000);
+
+    return capability;
+}
+
+// ─── Device Upsert ──────────────────────────────────────────────────
+
 function upsertDevice(device) {
-    // Normalise MAC to lowercase with colons
     const mac = normaliseMac(device.mac);
     if (!mac) {
         macTrackingStats.ignored++;
-        console.warn(`[Discovery] Skipping device with invalid MAC: ${device.mac} (IP: ${device.ip}, Source: ${device.source})`);
-        return null; // skip invalid MACs
-    }
-
-    // Skip link-local and broadcast MACs
-    if (isIgnoredMac(mac)) {
-        macTrackingStats.ignored++;
-        console.log(`[Discovery] Ignored MAC (multicast/broadcast): ${mac} (IP: ${device.ip}, Source: ${device.source})`);
         return null;
     }
 
-    // Check for randomized MACs (privacy concern - log for awareness)
-    const isRandomized = isRandomisedMac(mac);
-    if (isRandomized) {
+    if (isIgnoredMac(mac)) {
+        macTrackingStats.ignored++;
+        return null;
+    }
+
+    // Log randomized MACs for awareness
+    if (isRandomisedMac(mac)) {
         console.log(`[Discovery] Detected randomized MAC: ${mac} (IP: ${device.ip}, Source: ${device.source})`);
     }
 
-    const existing = db.prepare(`SELECT id, last_ip, hostname FROM discovered_devices WHERE mac_address = ?`).get(mac);
+    const existing = db.prepare(
+        'SELECT id, last_ip, hostname FROM discovered_devices WHERE mac_address = ?'
+    ).get(mac);
 
     if (existing) {
-        // Check for IP change (could indicate roaming or IP conflict)
+        // Track IP changes
         const oldIp = existing.last_ip;
         const newIp = device.ip || null;
         if (oldIp && newIp && oldIp !== newIp) {
@@ -98,28 +282,29 @@ function upsertDevice(device) {
             console.log(`[Discovery] MAC ${mac} changed IP: ${oldIp} -> ${newIp} (Source: ${device.source})`);
         }
 
-        // Update last known info but keep first_seen
         db.prepare(`
             UPDATE discovered_devices SET
-                last_ip   = COALESCE(?, last_ip),
-                hostname  = COALESCE(?, hostname),
-                is_wired  = COALESCE(?, is_wired),
-                source    = ?,
-                last_seen = CURRENT_TIMESTAMP
+                last_ip    = COALESCE(?, last_ip),
+                hostname   = COALESCE(?, hostname),
+                is_wired   = COALESCE(?, is_wired),
+                source     = ?,
+                segment_id = COALESCE(?, segment_id),
+                vendor     = COALESCE(?, vendor),
+                last_seen  = CURRENT_TIMESTAMP
             WHERE mac_address = ?
         `).run(
             device.ip || null,
             device.hostname || null,
             device.is_wired ?? null,
             device.source,
+            device.segment_id || null,
+            lookupMac(mac)?.manufacturer || null,
             mac
         );
         macTrackingStats.updated++;
         return { action: 'updated', mac, id: existing.id };
     } else {
-        // New device — insert and do OUI lookup for vendor
         const oui = lookupMac(mac);
-
         try {
             const result = db.prepare(`
                 INSERT INTO discovered_devices
@@ -135,11 +320,11 @@ function upsertDevice(device) {
                 oui?.manufacturer || null
             );
             macTrackingStats.inserted++;
-            console.log(`[Discovery] New device discovered: ${mac} (IP: ${device.ip}, Vendor: ${oui?.manufacturer || 'Unknown'}, Source: ${device.source})`);
+            console.log(`[Discovery] New device: ${mac} (IP: ${device.ip}, Vendor: ${oui?.manufacturer || 'Unknown'}, Source: ${device.source})`);
             return { action: 'inserted', mac, id: result.lastInsertRowid };
         } catch (err) {
             if (err.message && err.message.includes('UNIQUE constraint failed')) {
-                console.warn(`[Discovery] MAC collision detected: ${mac} - Race condition or normalization issue`);
+                // Race condition — another insert happened between SELECT and INSERT
                 return null;
             }
             throw err;
@@ -147,56 +332,225 @@ function upsertDevice(device) {
     }
 }
 
-async function harvestUnifiWifi() {
-    const clients = await unifiService.getClients();
-    if (!clients) return { harvested: 0, inserted: 0, updated: 0 };
+// ─── Source 1: UniFi Harvest ────────────────────────────────────────
 
-    let inserted = 0;
-    let updated = 0;
-    let ignored = 0;
+/**
+ * Harvest devices from UniFi API.
+ * A) Active clients (stat/sta) — WiFi + wired currently connected
+ * B) Historical users (list/user) — devices seen within the last 4 weeks
+ */
+async function harvestUnifiClients() {
+    const results = { wifi: 0, wired: 0, historical: 0, errors: [] };
 
-    for (const client of clients) {
-        if (!client.mac) {
-            ignored++;
-            continue;
+    // A — Current active clients (stat/sta)
+    try {
+        const clientsResponse = await unifiService.getClients();
+        const clients = clientsResponse?.data || clientsResponse || [];
+        if (Array.isArray(clients)) {
+            for (const client of clients) {
+                if (!client.mac) continue;
+                const segment = findSegmentForIp(client.ip);
+                upsertDevice({
+                    mac: client.mac,
+                    ip: client.ip,
+                    hostname: client.hostname || client.name || null,
+                    is_wired: client.is_wired ? 1 : 0,
+                    source: client.is_wired ? 'unifi_wired' : 'unifi_wifi',
+                    segment_id: segment?.id || null
+                });
+                client.is_wired ? results.wired++ : results.wifi++;
+            }
         }
-
-        // Find segment_id by matching client IP to segment CIDR
-        const segment = findSegmentForIp(client.ip);
-
-        const result = upsertDevice({
-            mac: client.mac,
-            ip: client.ip,
-            hostname: client.hostname || client.name || null,
-            is_wired: client.is_wired ? 1 : 0,
-            source: client.is_wired ? 'unifi_wired' : 'unifi_wifi',
-            segment_id: segment?.id || null
-        });
-
-        if (result?.action === 'inserted') inserted++;
-        else if (result?.action === 'updated') updated++;
-        else ignored++;
+    } catch (err) {
+        results.errors.push('stat/sta: ' + err.message);
     }
 
-    console.log(`[Discovery] UniFi harvest: ${inserted} new, ${updated} updated, ${ignored} ignored`);
-    return { harvested: inserted + updated, inserted, updated, ignored };
+    // B — Historical users (list/user)
+    // Only import devices seen within the last 4 weeks
+    try {
+        const usersResponse = await unifiService.getAllUsers();
+        const users = usersResponse?.data || usersResponse || [];
+        if (Array.isArray(users)) {
+            const fourWeeksAgo = Math.floor(Date.now() / 1000) - (28 * 24 * 60 * 60);
+
+            for (const user of users) {
+                if (!user.mac) continue;
+
+                // Filter: only include users seen within the last 4 weeks
+                // UniFi stores last_seen as epoch seconds
+                const lastSeen = user.last_seen || 0;
+                if (lastSeen < fourWeeksAgo) continue;
+
+                // Only insert if not already known
+                // (don't overwrite fresh stat/sta data)
+                const cleaned = normaliseMac(user.mac);
+                const existing = db.prepare(
+                    'SELECT id FROM discovered_devices WHERE mac_address = ?'
+                ).get(cleaned);
+
+                if (!existing) {
+                    const segment = findSegmentForIp(user.last_ip || user.ip);
+                    upsertDevice({
+                        mac: user.mac,
+                        ip: user.last_ip || user.ip || null,
+                        hostname: user.hostname || user.name || null,
+                        is_wired: user.is_wired ? 1 : 0,
+                        source: 'unifi_historical',
+                        segment_id: segment?.id || null
+                    });
+                    results.historical++;
+                }
+            }
+        }
+    } catch (err) {
+        results.errors.push('list/user: ' + err.message);
+    }
+
+    console.log(
+        `[Discovery] UniFi harvest: ${results.wifi} WiFi, ` +
+        `${results.wired} wired, ${results.historical} historical`
+    );
+    return results;
 }
 
-function parseArpOutput(output) {
+// ─── Source 2: nmap ARP Scan ────────────────────────────────────────
+
+/**
+ * Parse nmap greppable (-oG) output.
+ * Also handles normal nmap output where MAC lines appear after Host lines.
+ */
+function parseNmapOutput(output) {
     const entries = [];
     const lines = output.split('\n');
 
-    for (const line of lines) {
-        // Robust regex to capture IP and MAC from common "arp -a" outputs
-        // Matches:
-        // - "hostname (1.2.3.4) at 00:11:22:33:44:55 [ether]"
-        // - "? (1.2.3.4) at 00:11:22:33:44:55 [ether]"
-        // - "1.2.3.4  00-11-22-33-44-55  static"
-        // - "1.2.3.4  00:11:22:33:44:55"
+    // Pass 1: Find Host lines with status Up
+    const hostMap = {};
+    let lastUpHost = null;
 
+    for (const line of lines) {
+        // Greppable: Host: 192.168.1.1 (hostname) Status: Up
+        const greppableHost = line.match(
+            /^Host:\s+(\d+\.\d+\.\d+\.\d+)\s+\(([^)]*)\)\s+Status:\s+Up/
+        );
+        if (greppableHost) {
+            hostMap[greppableHost[1]] = greppableHost[2] || null;
+            lastUpHost = greppableHost[1];
+            continue;
+        }
+
+        // Normal output: Nmap scan report for hostname (ip) or just (ip)
+        const normalHost = line.match(
+            /Nmap scan report for\s+(?:(\S+)\s+)?\((\d+\.\d+\.\d+\.\d+)\)/
+        );
+        if (normalHost) {
+            hostMap[normalHost[2]] = normalHost[1] || null;
+            lastUpHost = normalHost[2];
+            continue;
+        }
+
+        // Normal output: Nmap scan report for 192.168.1.1
+        const simpleHost = line.match(
+            /Nmap scan report for\s+(\d+\.\d+\.\d+\.\d+)/
+        );
+        if (simpleHost) {
+            hostMap[simpleHost[1]] = null;
+            lastUpHost = simpleHost[1];
+            continue;
+        }
+
+        // MAC Address line: MAC Address: AA:BB:CC:DD:EE:FF (Vendor)
+        const macLine = line.match(
+            /MAC Address:\s+([0-9A-Fa-f:]{17})/
+        );
+        if (macLine && lastUpHost) {
+            entries.push({
+                ip: lastUpHost,
+                mac: macLine[1],
+                hostname: hostMap[lastUpHost] || null
+            });
+            lastUpHost = null; // consumed
+        }
+    }
+
+    return entries.filter(e => e.mac && e.ip);
+}
+
+/**
+ * Run nmap ARP ping scan on a CIDR range using a specific interface.
+ * -sn: no port scan (host discovery only)
+ * -PR: ARP ping only
+ * --interface: use specific network interface
+ */
+async function runNmapArpScan(cidr, iface, io) {
+    try {
+        const cmd = `nmap -sn -PR --interface ${iface} ${cidr}`;
+
+        if (io) {
+            io.emit('discovery:arp_progress', { stage: 'nmap_running', cidr });
+        }
+
+        console.log(`[Discovery] Running: ${cmd}`);
+        const { stdout } = await execAsync(cmd, { timeout: 120000 }); // 2 min max
+        return parseNmapOutput(stdout);
+    } catch (err) {
+        console.error('[Discovery] nmap scan error:', err.message);
+        return [];
+    }
+}
+
+/**
+ * Parse `ip neigh show` output.
+ * Format: 192.168.1.1 dev eth0 lladdr aa:bb:cc:dd:ee:ff REACHABLE
+ */
+function parseIpNeigh(output) {
+    const entries = [];
+    for (const line of output.split('\n')) {
+        const match = line.match(
+            /^(\d+\.\d+\.\d+\.\d+)\s+dev\s+\S+\s+lladdr\s+([0-9a-fA-F:]{17})\s+(\w+)/
+        );
+        if (!match) continue;
+        if (match[3] === 'FAILED') continue;
+        entries.push({
+            ip: match[1],
+            mac: match[2],
+            hostname: null,
+            state: match[3]
+        });
+    }
+    return entries.filter(e =>
+        e.mac && !isIgnoredMac(normaliseMac(e.mac))
+    );
+}
+
+/**
+ * Read ip neigh (Linux ARP cache), filtered to a CIDR range.
+ * Used as a supplement to nmap — catches entries nmap may have missed.
+ */
+async function readIpNeigh(cidr) {
+    try {
+        const { stdout } = await execAsync('ip neigh show');
+        const entries = parseIpNeigh(stdout);
+        const block = new Netmask(cidr);
+        return entries.filter(e => {
+            try { return block.contains(e.ip); }
+            catch { return false; }
+        });
+    } catch (err) {
+        console.warn('[Discovery] ip neigh failed:', err.message);
+        return [];
+    }
+}
+
+/**
+ * Parse `arp -a` output.
+ * Linux/Alpine: hostname (ip) at mac [ether] on iface
+ */
+function parseArpA(output) {
+    const entries = [];
+    for (const line of output.split('\n')) {
         const ipMatch = line.match(/(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})/);
         const macMatch = line.match(/([0-9a-fA-F]{2}[:\-][0-9a-fA-F]{2}[:\-][0-9a-fA-F]{2}[:\-][0-9a-fA-F]{2}[:\-][0-9a-fA-F]{2}[:\-][0-9a-fA-F]{2})/);
-        const hostMatch = line.match(/^(\S+)\s+\(/); // Try to get hostname if it exists at start of line
+        const hostMatch = line.match(/^(\S+)\s+\(/);
 
         if (ipMatch && macMatch) {
             entries.push({
@@ -206,164 +560,180 @@ function parseArpOutput(output) {
             });
         }
     }
-
-    // Filter out incomplete or ignored entries
     return entries.filter(e =>
-        e.mac &&
-        e.ip &&
-        !isIgnoredMac(normaliseMac(e.mac))
+        e.mac && e.ip && !isIgnoredMac(normaliseMac(e.mac))
     );
 }
 
-async function readArpCache() {
+/**
+ * Read arp -a (legacy fallback), filtered to a CIDR range.
+ */
+async function readArpA(cidr) {
     try {
         const { stdout } = await execAsync('arp -a');
-        return parseArpOutput(stdout);
+        const entries = parseArpA(stdout);
+        const block = new Netmask(cidr);
+        return entries.filter(e => {
+            try { return block.contains(e.ip); }
+            catch { return false; }
+        });
     } catch (err) {
-        console.error('ARP cache read failed:', err.message);
+        console.warn('[Discovery] arp -a failed:', err.message);
         return [];
     }
 }
 
-async function arpScanSegment(segmentId, fastify) {
-    const sId = Number(segmentId);
-    const segment = db.prepare('SELECT * FROM segments WHERE id = ?').get(sId);
-    if (!segment) throw new Error('Segment not found');
-
-    // Parse IP range from CIDR
-    const block = new Netmask(segment.cidr);
-    const ips = [];
-    block.forEach(ip => ips.push(ip));
-
-    // Emit scan started event
-    if (fastify && fastify.io) {
-        fastify.io.emit('discovery:arp_started', {
-            segment_id: sId,
-            total_ips: ips.length
-        });
+/**
+ * Main ARP scan orchestrator.
+ * 
+ * Auto-detects the server's L2 segment and scans it using the best
+ * available tool: nmap (primary) → ip neigh (supplement) → arp -a (fallback).
+ * 
+ * @param {object} io - Socket.IO server instance for emitting progress events
+ */
+async function arpScanL2Segment(io) {
+    if (arpScanRunning) {
+        throw new Error('ARP scan already in progress');
     }
 
-    // Step 1 — ping all IPs to populate ARP cache
-    // Use p-limit concurrency of 5 (non-aggressive)
-    const limit = pLimit(5);
-    let pinged = 0;
+    const capability = await checkDiscoveryCapability();
 
-    await Promise.all(ips.map(ip => limit(async () => {
-        try {
-            await ping.promise.probe(ip, { timeout: 1 });
-        } catch { /* ignore — just populating ARP cache */ }
-        pinged++;
-        // Emit progress every 10 IPs
-        if (fastify && fastify.io && pinged % 10 === 0) {
-            fastify.io.emit('discovery:arp_progress', {
-                segment_id: sId,
-                pinged,
-                total: ips.length
+    // Hard stop if environment cannot do ARP
+    if (!capability.can_arp_scan) {
+        return {
+            success: false,
+            reason: capability.platform_note || 'ARP scan not available',
+            macs_found: 0
+        };
+    }
+
+    const l2 = capability.l2_segment;
+    console.log(`[Discovery] ARP scan starting on ${l2.cidr} (${l2.segment}) via ${l2.interface}`);
+
+    arpScanRunning = true;
+    const discovered = [];
+
+    try {
+        // Emit scan started
+        if (io) {
+            io.emit('discovery:arp_started', {
+                cidr: l2.cidr,
+                segment: l2.segment,
+                segment_id: l2.segment_id
             });
         }
-    })));
 
-    // Small delay to let ARP cache settle
-    await new Promise(r => setTimeout(r, 500));
+        let arpEntries = [];
 
-    // Step 2 — read OS ARP cache
-    const arpEntries = await readArpCache();
+        // PRIMARY — nmap ARP ping scan
+        if (capability.nmap_available) {
+            arpEntries = await runNmapArpScan(l2.cidr, l2.interface, io);
+            console.log(`[Discovery] nmap found ${arpEntries.length} devices`);
+        }
 
-    // Step 3 — filter to IPs within this segment only
-    const segmentEntries = arpEntries.filter(e => block.contains(e.ip));
+        // SUPPLEMENT — ip neigh adds cache entries nmap may have missed
+        if (capability.ip_neigh_available) {
+            if (io) {
+                io.emit('discovery:arp_progress', { stage: 'ip_neigh', cidr: l2.cidr });
+            }
+            const neighEntries = await readIpNeigh(l2.cidr);
+            for (const entry of neighEntries) {
+                const mac = normaliseMac(entry.mac);
+                if (!mac) continue;
+                const exists = arpEntries.find(e => normaliseMac(e.mac) === mac);
+                if (!exists) {
+                    arpEntries.push(entry);
+                    console.log(`[Discovery] ip neigh added: ${entry.ip} ${entry.mac}`);
+                }
+            }
+        }
 
-    // Step 4 — upsert each discovered device
-    let discovered = 0;
-    const scanResultsForMerge = [];
+        // FALLBACK — arp -a if nothing else found anything
+        if (arpEntries.length === 0 && capability.arp_available) {
+            if (io) {
+                io.emit('discovery:arp_progress', { stage: 'arp_fallback', cidr: l2.cidr });
+            }
+            arpEntries = await readArpA(l2.cidr);
+            console.log(`[Discovery] arp -a fallback found ${arpEntries.length}`);
+        }
 
-    for (const entry of segmentEntries) {
-        upsertDevice({
-            mac: entry.mac,
-            ip: entry.ip,
-            hostname: entry.hostname || null,
-            is_wired: 1,    // ARP scan = wired assumption
-            source: 'arp_scan',
-            segment_id: sId
-        });
+        // Upsert all discovered devices
+        const scanResultsForMerge = [];
 
-        scanResultsForMerge.push({
-            ip: entry.ip,
-            status: 'up',
-            latency_ms: 1, // dummy for ARP
-            hostname: entry.hostname || null
-        });
+        for (const entry of arpEntries) {
+            const mac = normaliseMac(entry.mac);
+            if (!mac || isIgnoredMac(mac)) continue;
+            // Skip the server's own MAC
+            if (entry.ip === l2.ip) continue;
 
-        discovered++;
-    }
+            upsertDevice({
+                mac: entry.mac,
+                ip: entry.ip,
+                hostname: entry.hostname || null,
+                is_wired: 1,
+                source: 'arp_scan',
+                segment_id: l2.segment_id
+            });
 
-    // NEW: Also save to scan_results so mergeService picks it up for "Online Now"
-    // This makes ARP scans contribute to the active devices list immediately.
-    try {
-        db.prepare(`
-            INSERT INTO scan_results (segment_id, total_ips, online_count, raw_json)
-            VALUES (?, ?, ?, ?)
-        `).run(sId, ips.length, discovered, JSON.stringify(scanResultsForMerge));
-    } catch (e) {
-        console.error('Failed to save ARP scan to scan_results:', e.message);
-    }
+            scanResultsForMerge.push({
+                ip: entry.ip,
+                status: 'up',
+                latency_ms: 1,
+                hostname: entry.hostname || null
+            });
 
-    // Emit completion
-    if (fastify && fastify.io) {
-        fastify.io.emit('discovery:arp_complete', {
-            segment_id: sId,
-            ips_pinged: ips.length,
-            macs_found: discovered
-        });
-    }
+            discovered.push(entry);
+        }
 
-    return {
-        ips_pinged: ips.length,
-        macs_found: discovered,
-        entries: segmentEntries
-    };
-}
+        // Save to scan_results so mergeService picks it up for "Online Now"
+        if (l2.segment_id && scanResultsForMerge.length > 0) {
+            try {
+                db.prepare(`
+                    INSERT INTO scan_results (segment_id, hosts_found, hosts_up, raw_json)
+                    VALUES (?, ?, ?, ?)
+                `).run(l2.segment_id, scanResultsForMerge.length, scanResultsForMerge.length, JSON.stringify(scanResultsForMerge));
+            } catch (e) {
+                console.error('[Discovery] Failed to save ARP scan to scan_results:', e.message);
+            }
+        }
 
-async function arpScanAllSegments(fastify) {
-    const segments = db.prepare('SELECT * FROM segments').all();
-    const results = [];
-    for (const seg of segments) {
-        const result = await arpScanSegment(seg.id, fastify);
-        results.push({ segment: seg.name, ...result });
-    }
-    return results;
-}
+        // Emit completion
+        if (io) {
+            io.emit('discovery:arp_complete', {
+                cidr: l2.cidr,
+                segment: l2.segment,
+                segment_id: l2.segment_id,
+                macs_found: discovered.length
+            });
+        }
 
-async function safeArpScan(segmentId, fastify) {
-    if (arpScanRunning) {
-        throw new Error('An ARP scan is already in progress');
-    }
-    arpScanRunning = true;
-    try {
-        return await arpScanSegment(segmentId, fastify);
+        console.log(`[Discovery] ARP scan complete: ${discovered.length} devices on ${l2.cidr}`);
+
+        return {
+            success: true,
+            cidr: l2.cidr,
+            segment: l2.segment,
+            segment_id: l2.segment_id,
+            macs_found: discovered.length,
+            entries: discovered
+        };
+
     } finally {
         arpScanRunning = false;
     }
 }
 
-async function safeArpScanAll(fastify) {
-    if (arpScanRunning) {
-        throw new Error('An ARP scan is already in progress');
-    }
-    arpScanRunning = true;
-    try {
-        return await arpScanAllSegments(fastify);
-    } finally {
-        arpScanRunning = false;
-    }
-}
+// ─── Exports ────────────────────────────────────────────────────────
 
 module.exports = {
-    harvestUnifiWifi,
-    safeArpScan,
-    safeArpScanAll,
+    checkDiscoveryCapability,
+    getServerL2Segment,
+    harvestUnifiClients,
+    arpScanL2Segment,
     isArpScanRunning,
     upsertDevice,
     findSegmentForIp,
+    normaliseMac,
     getMacTrackingStats,
     resetMacTrackingStats
 };
