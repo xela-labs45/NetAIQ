@@ -2,6 +2,7 @@ const db = require('../db/database');
 const { z } = require('zod');
 const { pingDevice } = require('../services/pingService');
 const { mergeOnlineDevices, getOnlineCount } = require('../services/mergeService');
+const { lookupMac } = require('../services/macOuiService');
 
 function normaliseMac(mac) {
     if (!mac) return null;
@@ -81,8 +82,8 @@ module.exports = async function (fastify, opts) {
         // Check for existing segments if you want, or just leave segment_id null
         // Doing simple approach as requested.
         const insertStmt = db.prepare(`
-            INSERT INTO devices (hostname, ip_address, mac_address, device_type, is_critical, notes)
-            VALUES (?, ?, ?, 'workstation', 0, 'Auto-registered from live scan')
+            INSERT INTO devices (hostname, ip_address, mac_address, vendor, device_type, is_critical, notes)
+            VALUES (?, ?, ?, ?, 'workstation', 0, 'Auto-registered from live scan')
         `);
 
         // Check existing ones
@@ -111,7 +112,9 @@ module.exports = async function (fastify, opts) {
                 }
 
                 try {
-                    const info = insertStmt.run(d.hostname || null, d.ip, normalizedMac);
+                    // Look up vendor if not in request
+                    const vendor = d.vendor || (normalizedMac ? lookupMac(normalizedMac)?.manufacturer : null);
+                    const info = insertStmt.run(d.hostname || null, d.ip, normalizedMac, vendor);
 
                     const newDevice = db.prepare('SELECT * FROM devices WHERE id = ?').get(info.lastInsertRowid);
                     // Initial ping asynchronously
@@ -144,12 +147,13 @@ module.exports = async function (fastify, opts) {
 
         try {
             const normalizedMac = normaliseMac(mac_address);
+            const vendor = request.body.vendor || (normalizedMac ? lookupMac(normalizedMac)?.manufacturer : null);
             const stmt = db.prepare(`
-        INSERT INTO devices (hostname, ip_address, mac_address, device_type, segment_id, is_critical, notes)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO devices (hostname, ip_address, mac_address, vendor, device_type, segment_id, is_critical, notes)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
       `);
 
-            const info = stmt.run(hostname || null, ip_address, normalizedMac || null, device_type, segment_id || null, is_critical ? 1 : 0, notes || null);
+            const info = stmt.run(hostname || null, ip_address, normalizedMac || null, vendor, device_type, segment_id || null, is_critical ? 1 : 0, notes || null);
 
             const newDevice = db.prepare('SELECT * FROM devices WHERE id = ?').get(info.lastInsertRowid);
 
@@ -179,11 +183,13 @@ module.exports = async function (fastify, opts) {
         const { hostname, ip_address, mac_address, device_type, segment_id, is_critical, notes } = validation.data;
 
         try {
+            const normalizedMac = normaliseMac(mac_address);
+            const vendor = request.body.vendor || (normalizedMac ? lookupMac(normalizedMac)?.manufacturer : null);
             db.prepare(`
         UPDATE devices 
-        SET hostname = ?, ip_address = ?, mac_address = ?, device_type = ?, segment_id = ?, is_critical = ?, notes = ?
+        SET hostname = ?, ip_address = ?, mac_address = ?, vendor = ?, device_type = ?, segment_id = ?, is_critical = ?, notes = ?
         WHERE id = ?
-      `).run(hostname || null, ip_address, mac_address || null, device_type, segment_id || null, is_critical ? 1 : 0, notes || null, id);
+      `).run(hostname || null, ip_address, normalizedMac || null, vendor, device_type, segment_id || null, is_critical ? 1 : 0, notes || null, id);
 
             const device = db.prepare('SELECT * FROM devices WHERE id = ?').get(id);
             reply.send({ device });

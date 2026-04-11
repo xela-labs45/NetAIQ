@@ -20,6 +20,7 @@ CREATE TABLE IF NOT EXISTS devices (
   hostname TEXT,
   ip_address TEXT UNIQUE NOT NULL,
   mac_address TEXT,
+  vendor TEXT DEFAULT NULL,
   device_type TEXT,
   is_critical INTEGER DEFAULT 0,
   segment_id INTEGER REFERENCES segments(id) ON DELETE SET NULL,

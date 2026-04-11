@@ -10,6 +10,7 @@
 
 const db = require('../db/database');
 const unifiService = require('./unifiService');
+const { lookupMac } = require('./macOuiService');
 
 /**
  * Merge all online device sources into a deduplicated list keyed by IP.
@@ -183,6 +184,18 @@ async function mergeOnlineDevices() {
     const finalMerged = Array.from(merged.values()).map(device => {
         const isIpRegistered = device.ip && registeredIps.has(device.ip);
         const isMacRegistered = device.mac && registeredMacs.has(device.mac.toLowerCase());
+        
+        // Enrich with OUI vendor info if MAC is present
+        if (device.mac) {
+            const oui = lookupMac(device.mac);
+            if (oui) {
+                device.vendor = oui.manufacturer || device.vendor || null;
+                // Only override device_type/os_guess if they are null
+                if (!device.device_type) device.device_type = oui.device_type || null;
+                if (!device.os_guess) device.os_guess = oui.os_guess || null;
+            }
+        }
+
         return {
             ...device,
             is_registered: isIpRegistered || isMacRegistered

@@ -141,6 +141,10 @@ const start = async () => {
     const { startCleanupJobs } = require('./jobs/cleanupJob');
     startCleanupJobs();
 
+    // Run one-time OUI backfill for existing devices
+    const { backfillVendors } = require('./services/backfillService');
+    backfillVendors(fastify).catch(err => fastify.log.error(`Backfill failed: ${err.message}`));
+
     // Log discovery capabilities on startup
     const { checkDiscoveryCapability } = require('./services/discoveryService');
     checkDiscoveryCapability().then(cap => {

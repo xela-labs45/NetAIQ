@@ -60,4 +60,14 @@ if (legacyInterval) {
     console.log(`Migrated legacy scan interval to split polling configuration (${legacySeconds}s segment scan).`);
 }
 
+// Migration: Add vendor column to devices table if not exists
+try {
+    db.prepare("ALTER TABLE devices ADD COLUMN vendor TEXT DEFAULT NULL").run();
+    console.log('Database Migration: Added vendor column to devices table.');
+} catch (err) {
+    if (!err.message.includes('duplicate column name')) {
+        console.warn('Database Migration Warning (vendor column):', err.message);
+    }
+}
+
 module.exports = db;

@@ -134,8 +134,113 @@ const OUI_MAP = {
     '04BD88': { manufacturer: 'Aruba Networks', device_type: 'ap', os_guess: 'ArubaOS' },
     '186472': { manufacturer: 'Aruba Networks', device_type: 'ap', os_guess: 'ArubaOS' },
 
-    // Polycom / Cisco VoIP
-    '0004F2': { manufacturer: 'Polycom', device_type: 'voip_phone', os_guess: null },
+    // Ubiquiti Networks (Access Points & Routers)
+    'DC9FDB': { manufacturer: 'Ubiquiti', device_type: 'ap', os_guess: 'Linux' },
+    '802AA8': { manufacturer: 'Ubiquiti', device_type: 'ap', os_guess: 'Linux' },
+    '7483C2': { manufacturer: 'Ubiquiti', device_type: 'ap', os_guess: 'Linux' },
+    '788A20': { manufacturer: 'Ubiquiti', device_type: 'ap', os_guess: 'Linux' },
+    'B4FBE4': { manufacturer: 'Ubiquiti', device_type: 'ap', os_guess: 'Linux' },
+    '24A43C': { manufacturer: 'Ubiquiti', device_type: 'ap', os_guess: 'Linux' },
+    '687251': { manufacturer: 'Ubiquiti', device_type: 'ap', os_guess: 'Linux' },
+    'F09FC2': { manufacturer: 'Ubiquiti', device_type: 'router', os_guess: 'Linux' },
+    '44D9E7': { manufacturer: 'Ubiquiti', device_type: 'router', os_guess: 'Linux' },
+    '002722': { manufacturer: 'Ubiquiti', device_type: 'router', os_guess: 'Linux' },
+    '0418D6': { manufacturer: 'Ubiquiti', device_type: 'ap', os_guess: 'Linux' },
+    '18E829': { manufacturer: 'Ubiquiti', device_type: 'ap', os_guess: 'Linux' },
+    'E063DA': { manufacturer: 'Ubiquiti', device_type: 'ap', os_guess: 'Linux' },
+    '70A741': { manufacturer: 'Ubiquiti', device_type: 'ap', os_guess: 'Linux' },
+
+    // TP-Link
+    '50C7BF': { manufacturer: 'TP-Link', device_type: 'router', os_guess: 'RouterOS' },
+    'A0F3C1': { manufacturer: 'TP-Link', device_type: 'router', os_guess: 'RouterOS' },
+    'EC086B': { manufacturer: 'TP-Link', device_type: 'router', os_guess: 'RouterOS' },
+    'C4E984': { manufacturer: 'TP-Link', device_type: 'ap', os_guess: 'Linux' },
+
+    // MikroTik
+    '4C5E0C': { manufacturer: 'MikroTik', device_type: 'router', os_guess: 'RouterOS' },
+    'B869F4': { manufacturer: 'MikroTik', device_type: 'router', os_guess: 'RouterOS' },
+    '6C3B6B': { manufacturer: 'MikroTik', device_type: 'router', os_guess: 'RouterOS' },
+    'CC2DE0': { manufacturer: 'MikroTik', device_type: 'router', os_guess: 'RouterOS' },
+    'DC2C6E': { manufacturer: 'MikroTik', device_type: 'router', os_guess: 'RouterOS' },
+
+    // Cisco
+    '001B54': { manufacturer: 'Cisco', device_type: 'switch', os_guess: 'IOS' },
+    '0023AC': { manufacturer: 'Cisco', device_type: 'switch', os_guess: 'IOS' },
+    'F872EA': { manufacturer: 'Cisco', device_type: 'switch', os_guess: 'IOS' },
+    '70695A': { manufacturer: 'Cisco', device_type: 'ap', os_guess: 'IOS' },
+    '002CC8': { manufacturer: 'Cisco', device_type: 'router', os_guess: 'IOS' },
+
+    // HP / Aruba
+    '9C8E99': { manufacturer: 'HP', device_type: 'printer', os_guess: 'embedded' },
+    '3CD92B': { manufacturer: 'HP', device_type: 'laptop', os_guess: 'Windows' },
+    'B499BA': { manufacturer: 'Aruba', device_type: 'ap', os_guess: 'Linux' },
+    '000B86': { manufacturer: 'Aruba', device_type: 'ap', os_guess: 'Linux' },
+    '94B40F': { manufacturer: 'Aruba', device_type: 'ap', os_guess: 'Linux' },
+
+    // Dell
+    'F8DB88': { manufacturer: 'Dell', device_type: 'server', os_guess: 'Windows' },
+    '141877': { manufacturer: 'Dell', device_type: 'server', os_guess: 'Windows' },
+    'B083FE': { manufacturer: 'Dell', device_type: 'laptop', os_guess: 'Windows' },
+    '180373': { manufacturer: 'Dell', device_type: 'laptop', os_guess: 'Windows' },
+
+    // Lenovo
+    '54EE75': { manufacturer: 'Lenovo', device_type: 'laptop', os_guess: 'Windows' },
+    '0023AE': { manufacturer: 'Lenovo', device_type: 'laptop', os_guess: 'Windows' },
+    '28D244': { manufacturer: 'Lenovo', device_type: 'laptop', os_guess: 'Windows' },
+
+    // Zebra
+    '001570': { manufacturer: 'Zebra', device_type: 'iot', os_guess: 'embedded' },
+    '84248D': { manufacturer: 'Zebra', device_type: 'iot', os_guess: 'embedded' },
+    'AC3FA4': { manufacturer: 'Zebra', device_type: 'iot', os_guess: 'embedded' },
+
+    // Honeywell
+    '0026B9': { manufacturer: 'Honeywell', device_type: 'iot', os_guess: 'embedded' },
+    '446132': { manufacturer: 'Honeywell', device_type: 'iot', os_guess: 'embedded' },
+
+    // Hikvision (CCTV cameras)
+    'C056E3': { manufacturer: 'Hikvision', device_type: 'camera', os_guess: 'embedded' },
+    '4CBD8F': { manufacturer: 'Hikvision', device_type: 'camera', os_guess: 'embedded' },
+    'BCAD28': { manufacturer: 'Hikvision', device_type: 'camera', os_guess: 'embedded' },
+    '4419B6': { manufacturer: 'Hikvision', device_type: 'camera', os_guess: 'embedded' },
+
+    // Dahua (CCTV cameras)
+    'E0508B': { manufacturer: 'Dahua', device_type: 'camera', os_guess: 'embedded' },
+    '9002A9': { manufacturer: 'Dahua', device_type: 'camera', os_guess: 'embedded' },
+    '3CEF8C': { manufacturer: 'Dahua', device_type: 'camera', os_guess: 'embedded' },
+
+    // Axis (CCTV cameras)
+    '00408C': { manufacturer: 'Axis', device_type: 'camera', os_guess: 'embedded' },
+    'ACCC8E': { manufacturer: 'Axis', device_type: 'camera', os_guess: 'embedded' },
+
+    // Epson (printers)
+    '0026AB': { manufacturer: 'Epson', device_type: 'printer', os_guess: 'embedded' },
+    '44D244': { manufacturer: 'Epson', device_type: 'printer', os_guess: 'embedded' },
+
+    // Canon (printers)
+    '001E8F': { manufacturer: 'Canon', device_type: 'printer', os_guess: 'embedded' },
+    '04E676': { manufacturer: 'Canon', device_type: 'printer', os_guess: 'embedded' },
+
+    // Kyocera (printers)
+    '00C0EE': { manufacturer: 'Kyocera', device_type: 'printer', os_guess: 'embedded' },
+    '003057': { manufacturer: 'Kyocera', device_type: 'printer', os_guess: 'embedded' },
+
+    // Ricoh (printers)
+    '000074': { manufacturer: 'Ricoh', device_type: 'printer', os_guess: 'embedded' },
+    '002673': { manufacturer: 'Ricoh', device_type: 'printer', os_guess: 'embedded' },
+
+    // Grandstream (VoIP)
+    '000B82': { manufacturer: 'Grandstream', device_type: 'voip_phone', os_guess: 'embedded' },
+    'C074AD': { manufacturer: 'Grandstream', device_type: 'voip_phone', os_guess: 'embedded' },
+
+    // Yealink (VoIP)
+    '805EC0': { manufacturer: 'Yealink', device_type: 'voip_phone', os_guess: 'embedded' },
+    '001565': { manufacturer: 'Yealink', device_type: 'voip_phone', os_guess: 'embedded' },
+
+    // Polycom (VoIP)
+    '0004F2': { manufacturer: 'Polycom', device_type: 'voip_phone', os_guess: 'embedded' },
+    '64167F': { manufacturer: 'Polycom', device_type: 'voip_phone', os_guess: 'embedded' },
+
+    // Existing Polycom / Cisco VoIP
     '00908F': { manufacturer: 'Polycom', device_type: 'voip_phone', os_guess: null },
     '64167F': { manufacturer: 'Polycom', device_type: 'voip_phone', os_guess: null },
     '00036B': { manufacturer: 'Cisco VoIP', device_type: 'voip_phone', os_guess: null },
