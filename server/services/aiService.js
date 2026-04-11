@@ -791,8 +791,107 @@ Return this exact JSON:
   return result;
 }
 
+// ─── AI-Enhanced Telegram Alert ──────────────────────────────────
+
+const ALERT_SYSTEM_PROMPT = `You are a network operations assistant for an SMB network monitoring system. You receive structured data about network events and respond with concise, practical remediation steps for an IT administrator.
+
+Rules:
+- Maximum 4 action steps
+- Each step must be specific and immediately actionable
+- No markdown, no bullet symbols — use plain text with numbered steps only since output will be sent via Telegram HTML
+- No preamble, no explanation of what happened — the alert already contains that
+- Assume the administrator has physical access to the building and network equipment
+- Keep total response under 150 words`;
+
+const ALERT_USER_PROMPTS = {
+  critical_device_offline: (ctx) => `A critical network device has gone offline.
+
+Device Name: ${ctx.hostname || 'Unknown'}
+IP Address: ${ctx.ip_address || 'Unknown'}
+MAC Address: ${ctx.mac_address || 'Unknown'}
+Network Segment: ${ctx.segment_name || 'Unknown'}
+Subnet: ${ctx.segment_cidr || 'Unknown'}
+Last Seen: ${ctx.last_seen || 'Unknown'}
+Time Offline: ${ctx.minutes_offline || 'Unknown'} minutes
+
+What are the immediate action steps to investigate and restore this device?`,
+
+  critical_device_online: (ctx) => `A critical network device has come back online after being offline.
+
+Device Name: ${ctx.hostname || 'Unknown'}
+IP Address: ${ctx.ip_address || 'Unknown'}
+Network Segment: ${ctx.segment_name || 'Unknown'}
+Downtime: ${ctx.downtime || 'Unknown'}
+
+What follow-up steps should the administrator take to confirm stability and document the incident?`,
+
+  ap_offline: (ctx) => `A UniFi Access Point has gone offline.
+
+AP Name: ${ctx.name || 'Unknown'}
+MAC Address: ${ctx.mac || 'Unknown'}
+Last Seen: ${ctx.last_seen || 'Unknown'}
+Time Offline: ${ctx.minutes_offline || 'Unknown'} minutes
+
+What are the immediate action steps to investigate and restore this access point?`,
+
+  ap_online: (ctx) => `A UniFi Access Point has come back online after being offline.
+
+AP Name: ${ctx.name || 'Unknown'}
+MAC Address: ${ctx.mac || 'Unknown'}
+Downtime: ${ctx.downtime || 'Unknown'}
+
+What follow-up steps should the administrator take to confirm stability and document the incident?`,
+
+  segment_offline: (ctx) => `A network segment scan returned 0 devices, indicating the segment may be unreachable.
+
+Segment Name: ${ctx.segment_name || 'Unknown'}
+Subnet: ${ctx.segment_cidr || 'Unknown'}
+Expected Devices: ${ctx.expected_devices || 'Unknown'}
+Time: ${ctx.current_time || new Date().toISOString()}
+
+What are the immediate action steps to diagnose and restore connectivity to this network segment?`
+};
+
+/**
+ * Enhance a Telegram alert with AI-generated remediation steps.
+ * Has a hard 10-second timeout. Returns plain text or null.
+ *
+ * @param {'critical_device_offline'|'critical_device_online'|'ap_offline'|'ap_online'|'segment_offline'} eventType
+ * @param {object} context - Event-specific data
+ * @returns {Promise<string|null>}
+ */
+async function enhanceAlertWithAI(eventType, context) {
+  try {
+    const status = getAiStatus();
+    if (!status.available) return null;
+
+    // Check the telegram_ai_enhanced setting
+    const aiEnhanced = settingsService.get('telegram_ai_enhanced');
+    if (aiEnhanced !== '1') return null;
+
+    const promptBuilder = ALERT_USER_PROMPTS[eventType];
+    if (!promptBuilder) {
+      console.warn(`enhanceAlertWithAI: unknown event type '${eventType}'`);
+      return null;
+    }
+
+    const userPrompt = promptBuilder(context);
+
+    // Race the AI call against a 10-second timeout
+    const result = await Promise.race([
+      callAI(ALERT_SYSTEM_PROMPT, userPrompt, 300),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('AI timeout (10s)')), 10000))
+    ]);
+
+    return result || null;
+  } catch (err) {
+    console.error('enhanceAlertWithAI error (non-blocking):', err.message);
+    return null;
+  }
+}
+
 module.exports = {
   getAiStatus, testConnection, fetchModels, clearModelCache,
   identifyDevice, identifyDiscoveredDevice, getUnidentifiedDevices, detectAnomalies,
-  summariseAlerts, checkRateLimit
+  summariseAlerts, checkRateLimit, enhanceAlertWithAI
 };

@@ -3,7 +3,7 @@ import { useLocation } from 'react-router-dom';
 import {
     Box, Typography, Button, TextField, Grid, Card, Checkbox, Switch,
     FormControlLabel, Tabs, Tab, Alert, Snackbar, InputAdornment, IconButton,
-    MenuItem, Chip, CircularProgress
+    MenuItem, Chip, CircularProgress, Tooltip
 } from '@mui/material';
 import {
     Visibility, VisibilityOff, Save as SaveIcon, PlayArrow as TestIcon,
@@ -61,7 +61,7 @@ export default function Settings() {
     });
 
     const [telegram, setTelegram] = useState({
-        telegram_bot_token: '', telegram_chat_id: '', telegram_alerts_enabled: false
+        telegram_bot_token: '', telegram_chat_id: '', telegram_alerts_enabled: false, telegram_ai_enhanced: false
     });
 
     // Handle deep-linking to specific tabs (FIX 7)
@@ -146,7 +146,8 @@ export default function Settings() {
         setTelegram({
             telegram_bot_token: s.telegram_bot_token || '',
             telegram_chat_id: s.telegram_chat_id || '',
-            telegram_alerts_enabled: s.telegram_alerts_enabled === '1'
+            telegram_alerts_enabled: s.telegram_alerts_enabled === '1',
+            telegram_ai_enhanced: s.telegram_ai_enhanced === '1'
         });
 
         setPolling({
@@ -569,15 +570,63 @@ export default function Settings() {
                             )}
                         </Grid>
 
+                        {/* AI-Enhanced Alerts — only visible when Telegram is enabled */}
+                        {telegram.telegram_alerts_enabled && (
+                            <Box sx={{ mt: 3, p: 2.5, bgcolor: 'rgba(255,255,255,0.03)', borderRadius: 1, border: '1px solid rgba(255,255,255,0.08)' }}>
+                                <FormControlLabel
+                                    control={<Switch checked={telegram.telegram_ai_enhanced} onChange={(e) => setTelegram({ ...telegram, telegram_ai_enhanced: e.target.checked })} color="primary" />}
+                                    label="AI-Enhanced Alerts"
+                                />
+                                <Typography variant="body2" color="text.secondary" sx={{ ml: 5.8, mt: -0.5 }}>
+                                    Uses your configured AI provider to suggest immediate action steps for each alert. Requires a valid AI API key in AI Settings.
+                                </Typography>
+                                {telegram.telegram_ai_enhanced && (() => {
+                                    const hasKey = ai.ai_provider === 'openrouter'
+                                        ? !!ai.ai_openrouter_key && !ai.ai_openrouter_key.startsWith('sk-or-*')
+                                        : !!ai.ai_anthropic_key && !ai.ai_anthropic_key.startsWith('sk-ant-*');
+                                    if (!hasKey) return (
+                                        <Box sx={{ mt: 1.5, ml: 5.8, display: 'flex', alignItems: 'center', gap: 1, p: 1, borderRadius: 1, bgcolor: 'rgba(255,152,0,0.1)', border: '1px solid rgba(255,152,0,0.3)' }}>
+                                            <ErrorIcon fontSize="small" sx={{ color: 'warning.main' }} />
+                                            <Typography variant="body2" sx={{ color: 'warning.main' }}>
+                                                AI API key not configured. <span style={{ cursor: 'pointer', textDecoration: 'underline' }} onClick={() => setTabIndex(3)}>Go to AI Settings</span>.
+                                            </Typography>
+                                        </Box>
+                                    );
+                                    return null;
+                                })()}
+                            </Box>
+                        )}
+
                         <Box sx={{ mt: 4, display: 'flex', gap: 2 }}>
-                            <Button 
-                                variant="contained" 
-                                startIcon={<SaveIcon />} 
-                                onClick={() => saveTelegram.mutate(telegram)} 
-                                disabled={saveTelegram.isPending || (telegram.telegram_alerts_enabled && (!telegram.telegram_bot_token || !telegram.telegram_chat_id))}
-                            >
-                                {saveTelegram.isPending ? 'Saving…' : 'Save Settings'}
-                            </Button>
+                            {(() => {
+                                const hasKey = ai.ai_provider === 'openrouter'
+                                    ? !!ai.ai_openrouter_key && !ai.ai_openrouter_key.startsWith('sk-or-*')
+                                    : !!ai.ai_anthropic_key && !ai.ai_anthropic_key.startsWith('sk-ant-*');
+                                const isMissingKey = telegram.telegram_ai_enhanced && !hasKey;
+                                const isMissingTelegramCreds = telegram.telegram_alerts_enabled && (!telegram.telegram_bot_token || !telegram.telegram_chat_id);
+                                const isDisabled = saveTelegram.isPending || isMissingTelegramCreds || isMissingKey;
+
+                                const button = (
+                                    <Button 
+                                        variant="contained" 
+                                        startIcon={<SaveIcon />} 
+                                        onClick={() => saveTelegram.mutate(telegram)} 
+                                        disabled={isDisabled}
+                                    >
+                                        {saveTelegram.isPending ? 'Saving…' : 'Save Settings'}
+                                    </Button>
+                                );
+
+                                if (isMissingKey) {
+                                    return (
+                                        <Tooltip title="Configure an AI API key in AI Settings first" placement="top">
+                                            <span>{button}</span>
+                                        </Tooltip>
+                                    );
+                                }
+                                return button;
+                            })()}
+                            
                             <Button 
                                 variant="outlined" 
                                 startIcon={<TestIcon />} 

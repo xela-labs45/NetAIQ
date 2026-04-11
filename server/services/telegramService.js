@@ -1,5 +1,12 @@
 const db = require('../db/database');
 
+// Lazy-load aiService to avoid circular dependency
+let _aiService = null;
+function getAiService() {
+    if (!_aiService) _aiService = require('./aiService');
+    return _aiService;
+}
+
 /**
  * Telegram Bot Notification Service
  * 
@@ -94,6 +101,22 @@ function formatTimestamp() {
     return new Date().toISOString().replace('T', ' ').substring(0, 19);
 }
 
+/**
+ * Append AI-generated remediation steps to a base message.
+ * Returns the base message unchanged if AI is unavailable or fails.
+ */
+async function appendAiSection(baseMessage, eventType, context) {
+    try {
+        const aiService = getAiService();
+        const aiText = await aiService.enhanceAlertWithAI(eventType, context);
+        if (!aiText) return baseMessage;
+        return baseMessage + '\n\n' + '🤖 <b>AI Recommended Actions</b>\n' + aiText;
+    } catch (err) {
+        console.error('Telegram AI enhancement error (non-blocking):', err.message);
+        return baseMessage;
+    }
+}
+
 // ─── Alert Formatters ────────────────────────────────────────────
 
 /**
@@ -102,7 +125,16 @@ function formatTimestamp() {
 async function sendCriticalDeviceOffline(device, segmentName) {
     if (!isEnabled()) return;
 
-    const message = [
+    // Look up segment CIDR for AI context
+    let segmentCidr = null;
+    if (device.segment_id) {
+        try {
+            const seg = db.prepare('SELECT cidr FROM segments WHERE id = ?').get(device.segment_id);
+            segmentCidr = seg?.cidr || null;
+        } catch (_) { /* non-critical */ }
+    }
+
+    const baseMessage = [
         `🔴 <b>Critical Device Offline</b>`,
         ``,
         `<b>Device:</b> ${device.hostname || device.ip_address}`,
@@ -116,6 +148,17 @@ async function sendCriticalDeviceOffline(device, segmentName) {
         `Check the network immediately.`
     ].filter(Boolean).join('\n');
 
+    const aiContext = {
+        hostname: device.hostname,
+        ip_address: device.ip_address,
+        mac_address: device.mac_address,
+        segment_name: segmentName,
+        segment_cidr: segmentCidr,
+        last_seen: device.last_seen,
+        minutes_offline: device.last_seen ? Math.round((Date.now() - new Date(device.last_seen).getTime()) / 60000) : null
+    };
+
+    const message = await appendAiSection(baseMessage, 'critical_device_offline', aiContext);
     return sendMessage(message);
 }
 
@@ -125,18 +168,28 @@ async function sendCriticalDeviceOffline(device, segmentName) {
 async function sendCriticalDeviceOnline(device, segmentName, downtimeMs) {
     if (!isEnabled()) return;
 
-    const message = [
+    const downtimeStr = formatDowntime(downtimeMs);
+
+    const baseMessage = [
         `🟢 <b>Critical Device Restored</b>`,
         ``,
         `<b>Device:</b> ${device.hostname || device.ip_address}`,
         `<b>IP:</b> ${device.ip_address}`,
         segmentName ? `<b>Segment:</b> ${segmentName}` : null,
-        `<b>Downtime:</b> ${formatDowntime(downtimeMs)}`,
+        `<b>Downtime:</b> ${downtimeStr}`,
         `<b>Time:</b> ${formatTimestamp()}`,
         ``,
         `✅ Device is back online.`
     ].filter(Boolean).join('\n');
 
+    const aiContext = {
+        hostname: device.hostname,
+        ip_address: device.ip_address,
+        segment_name: segmentName,
+        downtime: downtimeStr
+    };
+
+    const message = await appendAiSection(baseMessage, 'critical_device_online', aiContext);
     return sendMessage(message);
 }
 
@@ -146,17 +199,29 @@ async function sendCriticalDeviceOnline(device, segmentName, downtimeMs) {
 async function sendApOffline(ap) {
     if (!isEnabled()) return;
 
-    const message = [
+    const lastSeenFormatted = ap.last_seen
+        ? new Date(ap.last_seen * 1000).toISOString().replace('T', ' ').substring(0, 19)
+        : null;
+
+    const baseMessage = [
         `🔴 <b>Access Point Offline</b>`,
         ``,
         `<b>AP Name:</b> ${ap.name || 'Unknown AP'}`,
         ap.mac ? `<b>MAC:</b> ${ap.mac}` : null,
-        ap.last_seen ? `<b>Last Seen:</b> ${new Date(ap.last_seen * 1000).toISOString().replace('T', ' ').substring(0, 19)}` : null,
+        lastSeenFormatted ? `<b>Last Seen:</b> ${lastSeenFormatted}` : null,
         `<b>Time:</b> ${formatTimestamp()}`,
         ``,
         `⚠️ Check UniFi and physical connection.`
     ].filter(Boolean).join('\n');
 
+    const aiContext = {
+        name: ap.name,
+        mac: ap.mac,
+        last_seen: lastSeenFormatted,
+        minutes_offline: ap.last_seen ? Math.round((Date.now() / 1000 - ap.last_seen) / 60) : null
+    };
+
+    const message = await appendAiSection(baseMessage, 'ap_offline', aiContext);
     return sendMessage(message);
 }
 
@@ -166,17 +231,26 @@ async function sendApOffline(ap) {
 async function sendApOnline(ap, downtimeMs) {
     if (!isEnabled()) return;
 
-    const message = [
+    const downtimeStr = formatDowntime(downtimeMs);
+
+    const baseMessage = [
         `🟢 <b>Access Point Restored</b>`,
         ``,
         `<b>AP Name:</b> ${ap.name || 'Unknown AP'}`,
         ap.mac ? `<b>MAC:</b> ${ap.mac}` : null,
-        `<b>Downtime:</b> ${formatDowntime(downtimeMs)}`,
+        `<b>Downtime:</b> ${downtimeStr}`,
         `<b>Time:</b> ${formatTimestamp()}`,
         ``,
         `✅ AP is back online.`
     ].filter(Boolean).join('\n');
 
+    const aiContext = {
+        name: ap.name,
+        mac: ap.mac,
+        downtime: downtimeStr
+    };
+
+    const message = await appendAiSection(baseMessage, 'ap_online', aiContext);
     return sendMessage(message);
 }
 
@@ -186,7 +260,7 @@ async function sendApOnline(ap, downtimeMs) {
 async function sendSegmentOffline(segment, expectedDevices, hostsFound) {
     if (!isEnabled()) return;
 
-    const message = [
+    const baseMessage = [
         `🔴 <b>Network Segment Unreachable</b>`,
         ``,
         `<b>Segment:</b> ${segment.name}`,
@@ -199,6 +273,14 @@ async function sendSegmentOffline(segment, expectedDevices, hostsFound) {
         `This may indicate a switch, router, or VLAN failure. Investigate immediately.`
     ].join('\n');
 
+    const aiContext = {
+        segment_name: segment.name,
+        segment_cidr: segment.cidr,
+        expected_devices: expectedDevices,
+        current_time: formatTimestamp()
+    };
+
+    const message = await appendAiSection(baseMessage, 'segment_offline', aiContext);
     return sendMessage(message);
 }
 
