@@ -22,7 +22,6 @@ services:
 
     volumes:
       - ./data:/app/data # persist SQLite DB
-      - ./server/public:/app/server/public # host build is reflected in the container
     env_file: .env
     restart: always
 
