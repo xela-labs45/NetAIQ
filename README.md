@@ -144,7 +144,8 @@ All settings can be configured from the **Settings** page in the UI after loggin
 
 ## 📲 Telegram Notifications
 
-NetMon can send real-time alerts to a Telegram chat or group when critical network events occur. No `.env` configuration is required — everything is managed from the Settings page.
+📲 Telegram Notifications — Real-time bot alerts for critical device offline/online, AP status changes, and segment outages
+- 🤖 **AI-Enhanced Telegram Alerts** — Optionally append AI-generated remediation steps to your Telegram notifications for immediate troubleshooting guidance
 
 ### 1. Create a Telegram Bot
 1. Open Telegram and search for **@BotFather**.
@@ -161,7 +162,8 @@ NetMon can send real-time alerts to a Telegram chat or group when critical netwo
 2. Toggle **Enable Telegram Notifications** on.
 3. Paste your **Bot Token** and **Chat ID**.
 4. Click **Test Notification** to send a test message.
-5. Click **Save Settings**.
+5. **Enable AI-Enhanced Alerts** (Optional): Toggle this on to use your configured AI provider to suggest remediation steps for each alert. Requires a valid API key in AI Settings.
+6. Click **Save Settings**.
 
 ### 4. Alert Types
 Telegram notifications are sent for the following events:
@@ -173,6 +175,9 @@ Telegram notifications are sent for the following events:
 | **Access Point Offline** | A UniFi AP goes offline | 🔴 Critical |
 | **Access Point Restored** | A UniFi AP that was offline comes back online | 🟢 Recovery |
 | **Segment Unreachable** | A network segment scan returns 0 devices | 🔴 Critical |
+
+> [!TIP]
+> **AI Remediation**: If "AI-Enhanced Alerts" is enabled, NetMon will append a **"🤖 AI Recommended Actions"** section to each Telegram message with 3-4 specific, actionable steps to resolve the issue.
 
 > [!NOTE]
 > Telegram alerts fire only on **status changes** (online → offline or offline → online), not on every scan cycle. Telegram failures are non-blocking and will never delay or crash the monitoring system.
@@ -341,6 +346,7 @@ Ensure your `JWT_SECRET` in `.env` is a long, random string. If you changed it w
 - **Test message fails:** Verify the bot token format (`123456789:ABCdef...`) and ensure the chat ID is numeric. For groups, use a negative number.
 - **No notifications received:** Confirm you sent `/start` to the bot first — Telegram bots cannot message users who haven't initiated a conversation.
 - **"Telegram alerts are disabled":** Navigate to Settings > Telegram and ensure the toggle is ON and settings are saved.
+- **AI Action Steps missing:** Ensure "AI-Enhanced Alerts" is toggled ON and you have a valid, active API key in the **AI Settings** tab. If the AI provider is down or exceeds 10s response time, NetMon will skip the enhancement and send the base alert instead.
 
 ---
 
