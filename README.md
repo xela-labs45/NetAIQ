@@ -22,6 +22,7 @@
 - � **UniFi Integration** — Full health oversight including WAN stats, Access Point status, and throughput monitoring
 - 🚨 **Bulk Device Management** — Register multiple discovered devices to tracking in a single click
 - 📧 **Automated Alerting** — Configurable email alerts (SMTP) for device events and high latency
+- 📲 **Telegram Notifications** — Real-time bot alerts for critical device offline/online, AP status changes, and segment outages
 - 🤖 **AI Insights** — Automated device identification (OUI + AI), 24h anomaly detection, and highly-efficient alert triage via Anthropic or OpenRouter
 - 🧹 **Automated Data Maintenance** — Configurable background jobs for ping history and alert data retention to maintain performance
 - 🔐 **Hardened Security** — Unified JWT authentication (Socket.IO + API), login rate limiting, atomic scan locking, and hidden production stack traces
@@ -44,7 +45,7 @@
 | **Auth** | JWT (`@fastify/jwt`), HTTP-only cookies, Rate Limiting |
 | **Validation** | `zod` (Strict schema-based input validation) |
 | **Monitoring** | `ping`, `node-cron`, `p-limit`, `netmask` |
-| **Notifications** | Nodemailer (SMTP) |
+| **Notifications** | Nodemailer (SMTP), Telegram Bot API |
 | **AI Providers** | Anthropic (e.g., Claude 3.5), OpenRouter (e.g., Llama 3, Mistral) |
 | **Deployment** | Docker, Docker Compose |
 
@@ -129,6 +130,7 @@ All settings can be configured from the **Settings** page in the UI after loggin
 |---|---|
 | **UniFi Controller** | URL and credentials for UniFi integration (Managed in UI) |
 | **SMTP / Email** | Mail server and recipient settings for alerts (Managed in UI) |
+| **Telegram** | Bot token and chat ID for real-time Telegram notifications (Managed in UI) |
 | **Ping Interval** | How often to ping tracked devices (default: 60s) |
 | **UniFi Sync Interval** | How often to pull data from UniFi (default: 5 min) |
 | **Alert Cooldown** | Prevents duplicate alerts for a device within this window (default: 15 min) |
@@ -137,6 +139,43 @@ All settings can be configured from the **Settings** page in the UI after loggin
 
 > [!NOTE]
 > Database cleanup jobs run automatically in the background. Unresolved critical alerts are protected and never deleted by retention policies.
+
+---
+
+## 📲 Telegram Notifications
+
+NetMon can send real-time alerts to a Telegram chat or group when critical network events occur. No `.env` configuration is required — everything is managed from the Settings page.
+
+### 1. Create a Telegram Bot
+1. Open Telegram and search for **@BotFather**.
+2. Send `/newbot` and follow the prompts to create a bot.
+3. Copy the **Bot Token** (e.g., `123456789:ABCdefGHIjklMNOpqrSTUvwxyz`).
+
+### 2. Get Your Chat ID
+1. Send `/start` to your new bot.
+2. Visit `https://api.telegram.org/bot<YOUR_TOKEN>/getUpdates` in a browser.
+3. Find your `chat_id` in the JSON response. For group chats, the ID will be negative.
+
+### 3. Configure in NetMon
+1. Navigate to **Settings > Telegram**.
+2. Toggle **Enable Telegram Notifications** on.
+3. Paste your **Bot Token** and **Chat ID**.
+4. Click **Test Notification** to send a test message.
+5. Click **Save Settings**.
+
+### 4. Alert Types
+Telegram notifications are sent for the following events:
+
+| Event | Trigger | Severity |
+|---|---|---|
+| **Critical Device Offline** | A device marked as critical fails ping checks | 🔴 Critical |
+| **Critical Device Restored** | A critical device that was offline comes back online | 🟢 Recovery |
+| **Access Point Offline** | A UniFi AP goes offline | 🔴 Critical |
+| **Access Point Restored** | A UniFi AP that was offline comes back online | 🟢 Recovery |
+| **Segment Unreachable** | A network segment scan returns 0 devices | 🔴 Critical |
+
+> [!NOTE]
+> Telegram alerts fire only on **status changes** (online → offline or offline → online), not on every scan cycle. Telegram failures are non-blocking and will never delay or crash the monitoring system.
 
 ---
 
@@ -221,6 +260,9 @@ All endpoints are prefixed with `/api/v1/` and require authentication (JWT cooki
 | `GET` | `/unifi/wlan` | Get Access Point health and WiFi throughput |
 | `GET` | `/unifi/clients-usage` | Get Top Clients with hostname resolution |
 | `GET/PUT` | `/settings` | Read/update application settings |
+| `GET` | `/settings/telegram` | Get Telegram settings (token masked) |
+| `PUT` | `/settings/telegram` | Save Telegram bot token, chat ID, and enabled flag |
+| `POST` | `/settings/telegram/test` | Send a test Telegram notification |
 | `GET` | `/ai/status` | Get current AI configuration and availability |
 | `GET` | `/ai/anomalies` | Get latest 24h anomaly analysis |
 | `GET` | `/ai/alert-summary` | Get latest 48h alert triage summary |
@@ -294,6 +336,11 @@ Ensure your `JWT_SECRET` in `.env` is a long, random string. If you changed it w
 - **502 Bad Gateway:** If after updating you see a 502 error, ensure all container dependencies are built correctly with `docker compose up -d --build netmon`.
 - **"AI Provider Not Configured":** Ensure you have both enabled the feature AND provided a valid API key in Settings.
 - **No Models in Dropdown:** Check your internet connection and verify your API key is active. Use the "Refresh Models" button.
+
+### Telegram Notification Issues
+- **Test message fails:** Verify the bot token format (`123456789:ABCdef...`) and ensure the chat ID is numeric. For groups, use a negative number.
+- **No notifications received:** Confirm you sent `/start` to the bot first — Telegram bots cannot message users who haven't initiated a conversation.
+- **"Telegram alerts are disabled":** Navigate to Settings > Telegram and ensure the toggle is ON and settings are saved.
 
 ---
 
