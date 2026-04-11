@@ -2,6 +2,7 @@ const db = require('../db/database');
 const bcrypt = require('bcrypt');
 const { authenticate } = require('../services/unifiService');
 const { sendEmailAlert } = require('../services/alertService');
+const telegramService = require('../services/telegramService');
 
 module.exports = async function (fastify, opts) {
     fastify.addHook('preValidation', fastify.authenticate);
@@ -29,6 +30,10 @@ module.exports = async function (fastify, opts) {
         if (settings.smtp_pass) settings.smtp_pass = '••••••••';
         if (settings.ai_claude_key) settings.ai_claude_key = `sk-ant-${'*'.repeat(8)}`;
         if (settings.ai_openrouter_key) settings.ai_openrouter_key = `sk-or-${'*'.repeat(8)}`;
+        if (settings.telegram_bot_token) {
+            const token = settings.telegram_bot_token;
+            settings.telegram_bot_token = '••••••••' + token.slice(-4);
+        }
 
         return settings;
     };
@@ -122,6 +127,41 @@ module.exports = async function (fastify, opts) {
             reply.send({ success: true, message: 'Test email sent successfully' });
         } else {
             reply.code(500).send({ error: true, message: 'Failed to send test email. Check settings and logs.' });
+        }
+    });
+
+    // ─── Telegram Endpoints ─────────────────────────────────────
+
+    fastify.get('/telegram', async (request, reply) => {
+        const tgSettings = telegramService.getSettings();
+        // Mask token — show only last 4 characters
+        if (tgSettings.telegram_bot_token) {
+            const token = tgSettings.telegram_bot_token;
+            tgSettings.telegram_bot_token = '••••••••' + token.slice(-4);
+        }
+        reply.send({ settings: tgSettings });
+    });
+
+    fastify.put('/telegram', async (request, reply) => {
+        const body = { ...request.body };
+        // Don't overwrite token if it's the masked value
+        if (body.telegram_bot_token && body.telegram_bot_token.startsWith('••••••••')) {
+            delete body.telegram_bot_token;
+        }
+        saveSettings(body);
+        reply.send({ success: true });
+    });
+
+    fastify.post('/telegram/test', async (request, reply) => {
+        try {
+            const result = await telegramService.sendTestMessage();
+            if (result.ok) {
+                reply.send({ success: true, message: 'Test notification sent successfully!' });
+            } else {
+                reply.code(400).send({ error: true, message: result.description || 'Failed to send test message' });
+            }
+        } catch (err) {
+            reply.code(500).send({ error: true, message: err.message || 'Unexpected error sending test message' });
         }
     });
 

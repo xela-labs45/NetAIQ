@@ -2,10 +2,15 @@ const cron = require('node-cron');
 const db = require('../db/database');
 const unifiService = require('../services/unifiService');
 const alertService = require('../services/alertService');
+const telegramService = require('../services/telegramService');
 const { harvestUnifiClients } = require('../services/discoveryService');
 
 let currentTask = null;
 let previousDisconnected = 0;
+
+// Per-AP state tracking for individual Telegram notifications
+// Map<mac, { state: 'connected'|'disconnected', since: timestamp, name: string }>
+let apStateMap = new Map();
 
 module.exports = function (fastify) {
     // Clear any existing job (for when settings change)
@@ -40,11 +45,13 @@ module.exports = function (fastify) {
             const harvested = await harvestUnifiClients();
             fastify.log.info(`Discovery: harvested ${harvested?.wifi || 0} WiFi, ${harvested?.wired || 0} wired, ${harvested?.historical || 0} historical`);
 
-            await unifiService.getDevices();
+            const devicesData = await unifiService.getDevices();
             await unifiService.getSiteHealth();
             const wlan = await unifiService.getWlanHealth();
 
             if (wlan) {
+                // ── Aggregate-based alerts (existing logic) ──────────────
+
                 // AP went offline
                 if (wlan.num_disconnected > previousDisconnected) {
                     const newOffline = wlan.num_disconnected - previousDisconnected;
@@ -83,6 +90,68 @@ module.exports = function (fastify) {
 
                 previousDisconnected = wlan.num_disconnected;
             }
+
+            // ── Per-AP Telegram notifications ────────────────────────
+            try {
+                const devices = devicesData?.data || devicesData || [];
+                const aps = Array.isArray(devices) ? devices.filter(d => d.type === 'uap') : [];
+
+                if (aps.length > 0) {
+                    const currentMacs = new Set();
+
+                    for (const ap of aps) {
+                        const mac = (ap.mac || '').toLowerCase();
+                        if (!mac) continue;
+                        currentMacs.add(mac);
+
+                        const isConnected = ap.state === 1;
+                        const prevState = apStateMap.get(mac);
+
+                        if (!prevState) {
+                            // First time seeing this AP — initialize state without alerting
+                            apStateMap.set(mac, {
+                                state: isConnected ? 'connected' : 'disconnected',
+                                since: Date.now(),
+                                name: ap.name || ap.hostname || mac
+                            });
+                            continue;
+                        }
+
+                        // State transition: connected → disconnected
+                        if (prevState.state === 'connected' && !isConnected) {
+                            fastify.log.warn(`AP ${ap.name || mac} went OFFLINE`);
+                            apStateMap.set(mac, {
+                                state: 'disconnected',
+                                since: Date.now(),
+                                name: ap.name || ap.hostname || mac
+                            });
+                            telegramService.sendApOffline({
+                                name: ap.name || ap.hostname || mac,
+                                mac: mac,
+                                last_seen: ap.last_seen || null
+                            });
+                        }
+
+                        // State transition: disconnected → connected
+                        if (prevState.state === 'disconnected' && isConnected) {
+                            fastify.log.info(`AP ${ap.name || mac} came back ONLINE`);
+                            const downtimeMs = Date.now() - prevState.since;
+                            apStateMap.set(mac, {
+                                state: 'connected',
+                                since: Date.now(),
+                                name: ap.name || ap.hostname || mac
+                            });
+                            telegramService.sendApOnline({
+                                name: ap.name || ap.hostname || mac,
+                                mac: mac
+                            }, downtimeMs);
+                        }
+                    }
+                }
+            } catch (tgErr) {
+                fastify.log.error('Telegram AP tracking error (non-blocking):', tgErr.message);
+            }
+
         } catch (err) {
             fastify.log.error('UniFi schedule task error:', err.message);
         }

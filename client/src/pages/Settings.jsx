@@ -8,7 +8,7 @@ import {
 import {
     Visibility, VisibilityOff, Save as SaveIcon, PlayArrow as TestIcon,
     CheckCircle as ConnectedIcon, Error as ErrorIcon, HelpOutline as UnknownIcon,
-    AutoAwesome as AiIcon, Refresh as RefreshIcon, Storage as StorageIcon
+    AutoAwesome as AiIcon, Refresh as RefreshIcon, Storage as StorageIcon, Send as TelegramIcon
 } from '@mui/icons-material';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import axios from 'axios';
@@ -47,6 +47,7 @@ export default function Settings() {
     const [toast, setToast] = useState({ open: false, message: '', severity: 'info' });
     const [unifiStatus, setUnifiStatus] = useState(null); // null | 'testing' | 'connected' | 'error'
     const [aiStatus, setAiStatus] = useState(null); // null | 'testing' | 'connected' | 'error'
+    const [telegramStatus, setTelegramStatus] = useState(null); // null | 'testing' | 'connected' | 'error'
 
     // Forms state
     const [unifi, setUnifi] = useState({
@@ -57,6 +58,10 @@ export default function Settings() {
         smtp_host: '', smtp_port: '587', smtp_secure: false, smtp_user: '', smtp_pass: '',
         alert_from: '', alert_to: '',
         alert_on_offline: true, alert_on_critical_offline: true, alert_on_online: true, alert_on_high_latency: false
+    });
+
+    const [telegram, setTelegram] = useState({
+        telegram_bot_token: '', telegram_chat_id: '', telegram_alerts_enabled: false
     });
 
     // Handle deep-linking to specific tabs (FIX 7)
@@ -138,6 +143,12 @@ export default function Settings() {
             alert_on_high_latency: s.alert_on_high_latency === '1',
         });
 
+        setTelegram({
+            telegram_bot_token: s.telegram_bot_token || '',
+            telegram_chat_id: s.telegram_chat_id || '',
+            telegram_alerts_enabled: s.telegram_alerts_enabled === '1'
+        });
+
         setPolling({
             ping_interval_ms: s.ping_interval_ms || '60000',
             unifi_interval_ms: s.unifi_interval_ms || '300000',
@@ -180,6 +191,14 @@ export default function Settings() {
         }
     });
 
+    const saveTelegram = useMutation({
+        mutationFn: (data) => axios.put('/api/v1/settings/telegram', data),
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: ['settings'] });
+            showToast('Telegram settings saved successfully');
+        }
+    });
+
     const savePolling = useMutation({
         mutationFn: (data) => axios.put('/api/v1/settings/polling', data),
         onSuccess: () => showToast('Polling settings saved. Jobs restarted.')
@@ -211,6 +230,19 @@ export default function Settings() {
         mutationFn: () => axios.post('/api/v1/settings/test-email'),
         onSuccess: (res) => showToast(res.data.message),
         onError: (err) => showToast(err.response?.data?.message || 'Failed to send test email', 'error')
+    });
+
+    const testTelegram = useMutation({
+        mutationFn: () => axios.post('/api/v1/settings/telegram/test'),
+        onMutate: () => setTelegramStatus('testing'),
+        onSuccess: (res) => {
+            setTelegramStatus('connected');
+            showToast(res.data.message);
+        },
+        onError: (err) => {
+            setTelegramStatus('error');
+            showToast(err.response?.data?.message || 'Failed to send test telegram', 'error');
+        }
     });
 
     const saveAi = useMutation({
@@ -297,6 +329,12 @@ export default function Settings() {
                             </Box>
                         } />
                         <Tab label="Email Alerts" />
+                        <Tab label={
+                            <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                                Telegram
+                                <UnifiStatusChip status={telegramStatus} />
+                            </Box>
+                        } />
                         <Tab label={
                             <Box sx={{ display: 'flex', alignItems: 'center' }}>
                                 AI Insights
@@ -465,8 +503,95 @@ export default function Settings() {
                     </Box>
                 </TabPanel>
 
-                {/* AI TAB */}
+                {/* TELEGRAM TAB */}
                 <TabPanel value={tabIndex} index={2}>
+                    <Box sx={{ p: 4, maxWidth: 600 }}>
+                        <Typography variant="h6" gutterBottom>Telegram Bot Notifications</Typography>
+                        <Typography variant="body2" color="text.secondary" sx={{ mb: 4 }}>
+                            Send real-time alerts to a Telegram chat or group when critical network events occur.
+                        </Typography>
+
+                        <FormControlLabel
+                            sx={{ mb: 3 }}
+                            control={<Switch checked={telegram.telegram_alerts_enabled} onChange={(e) => setTelegram({ ...telegram, telegram_alerts_enabled: e.target.checked })} color="primary" />}
+                            label="Enable Telegram Notifications"
+                        />
+
+                        <Grid container spacing={3}>
+                            <Grid item xs={12}>
+                                <TextField
+                                    fullWidth label="Bot Token"
+                                    type={showPassword ? 'text' : 'password'}
+                                    value={telegram.telegram_bot_token}
+                                    placeholder={telegram.telegram_bot_token?.startsWith('••••••••') ? 'Token saved — enter new to change' : 'Enter your Telegram Bot Token'}
+                                    onChange={(e) => setTelegram({ ...telegram, telegram_bot_token: e.target.value })}
+                                    helperText={telegram.telegram_bot_token?.startsWith('••••••••') ? 'A token is already saved.' : 'Get your token from @BotFather on Telegram (e.g. 123456789:ABCdef...)'}
+                                    InputProps={{
+                                        endAdornment: (
+                                            <InputAdornment position="end">
+                                                <IconButton onClick={() => setShowPassword(!showPassword)} edge="end">
+                                                    {showPassword ? <VisibilityOff /> : <Visibility />}
+                                                </IconButton>
+                                            </InputAdornment>
+                                        )
+                                    }}
+                                    error={!!telegram.telegram_bot_token && !telegram.telegram_bot_token.includes(':') && !telegram.telegram_bot_token.startsWith('••••••••')}
+                                />
+                            </Grid>
+                            <Grid item xs={12}>
+                                <TextField
+                                    fullWidth label="Chat ID"
+                                    value={telegram.telegram_chat_id}
+                                    placeholder="Enter your Chat ID"
+                                    onChange={(e) => setTelegram({ ...telegram, telegram_chat_id: e.target.value })}
+                                    helperText="Send /start to your bot then visit api.telegram.org/bot{TOKEN}/getUpdates to find your chat_id. Can be negative for groups."
+                                    error={!!telegram.telegram_chat_id && isNaN(Number(telegram.telegram_chat_id))}
+                                />
+                            </Grid>
+                            {/* Connection status info box */}
+                            {telegramStatus && (
+                                <Grid item xs={12}>
+                                    <Box sx={{
+                                        p: 2, borderRadius: 1,
+                                        bgcolor: telegramStatus === 'connected' ? 'success.main' : telegramStatus === 'error' ? 'error.main' : 'rgba(255,255,255,0.05)',
+                                        display: 'flex', alignItems: 'center', gap: 1
+                                    }}>
+                                        {telegramStatus === 'connected' && <ConnectedIcon fontSize="small" />}
+                                        {telegramStatus === 'error' && <ErrorIcon fontSize="small" />}
+                                        {telegramStatus === 'testing' && <CircularProgress size={16} />}
+                                        <Typography variant="body2">
+                                            {telegramStatus === 'connected' && 'Test message sent successfully'}
+                                            {telegramStatus === 'error' && 'Failed to send message — check your Token and Chat ID'}
+                                            {telegramStatus === 'testing' && 'Sending test message…'}
+                                        </Typography>
+                                    </Box>
+                                </Grid>
+                            )}
+                        </Grid>
+
+                        <Box sx={{ mt: 4, display: 'flex', gap: 2 }}>
+                            <Button 
+                                variant="contained" 
+                                startIcon={<SaveIcon />} 
+                                onClick={() => saveTelegram.mutate(telegram)} 
+                                disabled={saveTelegram.isPending || (telegram.telegram_alerts_enabled && (!telegram.telegram_bot_token || !telegram.telegram_chat_id))}
+                            >
+                                {saveTelegram.isPending ? 'Saving…' : 'Save Settings'}
+                            </Button>
+                            <Button 
+                                variant="outlined" 
+                                startIcon={<TestIcon />} 
+                                onClick={() => testTelegram.mutate()} 
+                                disabled={testTelegram.isPending || !telegram.telegram_bot_token || !telegram.telegram_chat_id}
+                            >
+                                {testTelegram.isPending ? 'Sending…' : 'Test Notification'}
+                            </Button>
+                        </Box>
+                    </Box>
+                </TabPanel>
+
+                {/* AI TAB */}
+                <TabPanel value={tabIndex} index={3}>
                     <Box sx={{ p: 4, maxWidth: 800 }}>
                         <Typography variant="h6" gutterBottom>AI Assistant Configuration</Typography>
                         <Typography variant="body2" color="text.secondary" sx={{ mb: 4 }}>
@@ -614,7 +739,7 @@ export default function Settings() {
                 </TabPanel>
 
                 {/* POLLING TAB */}
-                <TabPanel value={tabIndex} index={3}>
+                <TabPanel value={tabIndex} index={4}>
                     <Box sx={{ p: 4, maxWidth: 700 }}>
                         <Typography variant="h6" gutterBottom>Background Jobs Configuration</Typography>
                         <Grid container spacing={4}>
@@ -710,7 +835,7 @@ export default function Settings() {
                 </TabPanel>
 
                 {/* ACCOUNT TAB */}
-                <TabPanel value={tabIndex} index={4}>
+                <TabPanel value={tabIndex} index={5}>
                     <Box sx={{ p: 4, maxWidth: 600 }}>
                         <Typography variant="h6" gutterBottom>Admin Account</Typography>
                         <Box sx={{ mb: 4, p: 2, bgcolor: 'rgba(255,255,255,0.03)', borderRadius: 1 }}>

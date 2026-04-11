@@ -1,6 +1,7 @@
 const ping = require('ping');
 const db = require('../db/database');
 const alertService = require('./alertService');
+const telegramService = require('./telegramService');
 
 async function performPing(device) {
     try {
@@ -48,6 +49,25 @@ async function pingDevice(device, fastify) {
             severity,
             fastify
         });
+
+        // Telegram: only for critical devices
+        if (device.is_critical) {
+            try {
+                const segment = device.segment_id
+                    ? db.prepare('SELECT name FROM segments WHERE id = ?').get(device.segment_id)
+                    : null;
+                const lastPingTime = db.prepare(
+                    "SELECT timestamp FROM ping_history WHERE device_id = ? AND status = 'up' ORDER BY timestamp DESC LIMIT 1"
+                ).get(device.id);
+                const enrichedDevice = {
+                    ...device,
+                    last_seen: lastPingTime?.timestamp || null
+                };
+                telegramService.sendCriticalDeviceOffline(enrichedDevice, segment?.name || null);
+            } catch (err) {
+                console.error('Telegram critical-offline error (non-blocking):', err.message);
+            }
+        }
     } else if (!wasUp && isUp && lastPing) {
         // Device came back up
         await alertService.createAlert({
@@ -57,6 +77,25 @@ async function pingDevice(device, fastify) {
             severity: 'info',
             fastify
         });
+
+        // Telegram: only for critical devices
+        if (device.is_critical) {
+            try {
+                const segment = device.segment_id
+                    ? db.prepare('SELECT name FROM segments WHERE id = ?').get(device.segment_id)
+                    : null;
+                // Calculate downtime from last UP ping
+                const lastUpPing = db.prepare(
+                    "SELECT timestamp FROM ping_history WHERE device_id = ? AND status = 'up' ORDER BY timestamp DESC LIMIT 1 OFFSET 1"
+                ).get(device.id);
+                const downtimeMs = lastUpPing?.timestamp
+                    ? Date.now() - new Date(lastUpPing.timestamp).getTime()
+                    : null;
+                telegramService.sendCriticalDeviceOnline(device, segment?.name || null, downtimeMs);
+            } catch (err) {
+                console.error('Telegram critical-online error (non-blocking):', err.message);
+            }
+        }
     } else if (isUp && result.latency_ms > 200) {
         // High latency
         await alertService.createAlert({

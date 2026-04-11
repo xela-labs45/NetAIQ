@@ -1,8 +1,10 @@
 const cron = require('node-cron');
 const db = require('../db/database');
 const { scanSegment } = require('../services/scanService');
+const telegramService = require('../services/telegramService');
 
 let currentTask = null;
+let previousSegmentZeros = new Set();
 
 module.exports = function (fastify) {
     // Clear any existing job (for when settings change)
@@ -37,7 +39,27 @@ module.exports = function (fastify) {
         for (const seg of segments) {
             try {
                 fastify.log.info(`Background scanning segment ${seg.id}...`);
-                await scanSegment(seg.id, fastify);
+                const results = await scanSegment(seg.id, fastify);
+
+                // Telegram: check for offline segment (0 hosts up, but devices exist in DB)
+                try {
+                    const expectedDevices = db.prepare('SELECT COUNT(*) as count FROM devices WHERE segment_id = ?').get(seg.id).count;
+                    const hostsUp = results.filter(r => r.status === 'up').length;
+
+                    if (hostsUp === 0 && expectedDevices > 0) {
+                        if (!previousSegmentZeros.has(seg.id)) {
+                            fastify.log.warn(`Segment ${seg.id} offline (expected ${expectedDevices}, found 0). Sending Telegram alert.`);
+                            const segment = db.prepare('SELECT name, cidr FROM segments WHERE id = ?').get(seg.id);
+                            telegramService.sendSegmentOffline(segment, expectedDevices, hostsUp);
+                            previousSegmentZeros.add(seg.id);
+                        }
+                    } else if (hostsUp > 0) {
+                        previousSegmentZeros.delete(seg.id);
+                    }
+                } catch (tgErr) {
+                    fastify.log.error(`Segment ${seg.id} Telegram check error (non-blocking): ${tgErr.message}`);
+                }
+
             } catch (err) {
                 // Ignore if already running, else log
                 if (err.message !== 'A scan is already in progress.') {
