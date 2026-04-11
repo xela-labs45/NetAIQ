@@ -132,9 +132,9 @@ const start = async () => {
     fastify.log.info(`Server listening on port ${port}`);
 
     // Start background jobs after server is up
-    require('./jobs/pingJob')(fastify);
+    require('./jobs/criticalPingJob').start(fastify);
     require('./jobs/unifiJob')(fastify);
-    require('./jobs/scanJob')(fastify);
+    require('./jobs/scanJob').start(fastify);
     const { startAiJobs } = require('./jobs/aiJob');
     startAiJobs(fastify);
 

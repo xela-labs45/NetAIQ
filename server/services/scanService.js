@@ -22,8 +22,12 @@ async function scanSegment(segmentId, fastify) {
 
         const block = new Netmask(segment.cidr);
         const ips = [];
+        const criticalIps = new Set(db.prepare('SELECT ip_address FROM devices WHERE is_critical = 1').all().map(d => d.ip_address));
+        
         block.forEach((ip) => {
-            ips.push(ip);
+            if (!criticalIps.has(ip)) {
+                ips.push(ip);
+            }
         });
 
         const limit = pLimit(5);

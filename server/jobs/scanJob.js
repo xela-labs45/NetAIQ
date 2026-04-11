@@ -1,42 +1,44 @@
-const cron = require('node-cron');
 const db = require('../db/database');
 const { scanSegment } = require('../services/scanService');
 const telegramService = require('../services/telegramService');
+const criticalPingJob = require('./criticalPingJob'); // to check if it's executing
 
-let currentTask = null;
+let currentTimer = null;
+let isRunning = false;
+let nextRunTime = null;
 let previousSegmentZeros = new Set();
 
-module.exports = function (fastify) {
-    // Clear any existing job (for when settings change)
-    if (currentTask) {
-        currentTask.stop();
+function getInterval() {
+    const setting = db.prepare('SELECT value FROM settings WHERE key = ?').get('segment_scan_interval');
+    return (parseInt(setting?.value || '900', 10) * 1000); // converting to ms
+}
+
+async function runScanCycle(fastify) {
+    if (isRunning) return;
+    
+    // Check if critical ping is running, if so, delay by 5 seconds
+    if (criticalPingJob.getStatus && criticalPingJob.getStatus().isExecuting) {
+        fastify.log.info('Segment scan delayed because critical ping scan is currently executing.');
+        currentTimer = setTimeout(() => runScanCycle(fastify), 5000);
+        return;
     }
 
-    // Segment scans are heavy, so we run them less frequently than simple pings.
-    // We base it on ping_interval but force a minimum of 5 minutes.
-    const getInterval = () => {
-        const setting = db.prepare('SELECT value FROM settings WHERE key = ?').get('ping_interval_ms');
-        return parseInt(setting?.value || '300000', 10);
-    };
+    isRunning = true;
+    fastify.log.info('Running scheduled segment scan job...');
 
-    const msToCron = (ms) => {
-        if (ms <= 300000) return '*/5 * * * *'; // 5m
-        if (ms <= 600000) return '*/10 * * * *'; // 10m
-        if (ms <= 900000) return '*/15 * * * *'; // 15m
-        return '*/30 * * * *'; // 30m
-    };
-
-    const intervalMs = getInterval();
-    const cronExpression = msToCron(intervalMs);
-
-    fastify.log.info(`Registering scanJob with cron: ${cronExpression}`);
-
-    currentTask = cron.schedule(cronExpression, async () => {
-        fastify.log.info('Running scheduled segment scan job...');
-
+    try {
         const segments = db.prepare('SELECT id FROM segments').all();
 
         for (const seg of segments) {
+            // Again check if critical ping started while we were picking the next segment
+            if (criticalPingJob.getStatus && criticalPingJob.getStatus().isExecuting) {
+                fastify.log.info(`Pausing segment scan before segment ${seg.id} because critical ping started.`);
+                // Wait for it to finish by sleeping 5 seconds and checking again
+                while (criticalPingJob.getStatus().isExecuting) {
+                    await new Promise(res => setTimeout(res, 5000));
+                }
+            }
+
             try {
                 fastify.log.info(`Background scanning segment ${seg.id}...`);
                 const results = await scanSegment(seg.id, fastify);
@@ -61,12 +63,51 @@ module.exports = function (fastify) {
                 }
 
             } catch (err) {
-                // Ignore if already running, else log
                 if (err.message !== 'A scan is already in progress.') {
                     fastify.log.error(`Segment ${seg.id} scheduled scan error: ${err.message}`);
                 }
             }
         }
         fastify.log.info(`Segment scan job completed for ${segments.length} segments.`);
-    });
+    } catch (err) {
+        fastify.log.error(`Segment scan job error: ${err.message}`);
+    } finally {
+        isRunning = false;
+        scheduleNext(fastify);
+    }
+}
+
+function scheduleNext(fastify) {
+    if (currentTimer) clearTimeout(currentTimer);
+    
+    // Interval might have been updated during the run
+    const intervalMs = getInterval();
+    nextRunTime = Date.now() + intervalMs;
+    
+    currentTimer = setTimeout(() => {
+        runScanCycle(fastify);
+    }, intervalMs);
+}
+
+module.exports = {
+    start: function(fastify) {
+        fastify.log.info('Starting segmentScanJob scheduler...');
+        if (currentTimer) clearTimeout(currentTimer);
+        // Start immediately
+        runScanCycle(fastify);
+    },
+    stop: function() {
+        if (currentTimer) {
+            clearTimeout(currentTimer);
+            currentTimer = null;
+        }
+        nextRunTime = null;
+    },
+    getStatus: function() {
+        return {
+            running: currentTimer !== null || isRunning,
+            isExecuting: isRunning,
+            nextRunExpectedAt: nextRunTime
+        };
+    }
 };

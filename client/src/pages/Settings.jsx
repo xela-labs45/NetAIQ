@@ -75,7 +75,7 @@ export default function Settings() {
 
 
     const [polling, setPolling] = useState({
-        ping_interval_ms: '60000', unifi_interval_ms: '300000', alert_cooldown_ms: '900000',
+        critical_ping_interval: '120', segment_scan_interval: '900', unifi_interval_ms: '300000', alert_cooldown_ms: '900000',
         ping_history_retention_days: '90', alert_cooldown_minutes: '15', alert_retention_days: '180'
     });
 
@@ -151,7 +151,8 @@ export default function Settings() {
         });
 
         setPolling({
-            ping_interval_ms: s.ping_interval_ms || '60000',
+            critical_ping_interval: s.critical_ping_interval || '120',
+            segment_scan_interval: s.segment_scan_interval || '900',
             unifi_interval_ms: s.unifi_interval_ms || '300000',
             alert_cooldown_ms: s.alert_cooldown_ms || '900000',
             ping_history_retention_days: s.ping_history_retention_days || '90',
@@ -288,6 +289,13 @@ export default function Settings() {
         },
         enabled: (!!ai.ai_anthropic_key || !!ai.ai_openrouter_key) && !!ai.ai_provider,
         staleTime: 600000, // 10 mins
+    });
+
+    const { data: pollingStatus } = useQuery({
+        queryKey: ['pollingStatus'],
+        queryFn: () => axios.get('/api/v1/settings/polling-status').then(res => res.data),
+        refetchInterval: 5000,
+        enabled: tabIndex === 4
     });
 
     const fetchAiStatus = useQuery({
@@ -793,20 +801,37 @@ export default function Settings() {
                         <Typography variant="h6" gutterBottom>Background Jobs Configuration</Typography>
                         <Grid container spacing={4}>
                             <Grid item xs={12}>
+                                <Typography variant="subtitle2" color="primary" sx={{ mb: 2 }}>--- Critical Device Polling ---</Typography>
                                 <TextField
-                                    select fullWidth label="ICMP Ping Interval" helperText="How often to ping all devices in the database"
-                                    value={polling.ping_interval_ms} onChange={(e) => setPolling({ ...polling, ping_interval_ms: e.target.value })}
-                                >
-                                    <MenuItem value="10000">10 Seconds</MenuItem>
-                                    <MenuItem value="15000">15 Seconds</MenuItem>
-                                    <MenuItem value="30000">30 Seconds</MenuItem>
-                                    <MenuItem value="60000">1 Minute</MenuItem>
-                                    <MenuItem value="120000">2 Minutes</MenuItem>
-                                    <MenuItem value="300000">5 Minutes</MenuItem>
-                                    <MenuItem value="600000">10 Minutes</MenuItem>
-                                </TextField>
+                                    fullWidth type="number"
+                                    label="Critical Device Check Interval (Seconds)" 
+                                    helperText="How often to ping devices marked as critical. Recommended: 60-120 seconds."
+                                    value={polling.critical_ping_interval} 
+                                    onChange={(e) => setPolling({ ...polling, critical_ping_interval: e.target.value })}
+                                    inputProps={{ min: 30, max: 600 }}
+                                />
+                                <Box sx={{ mt: 2, p: 2, bgcolor: 'rgba(255,152,0,0.1)', borderRadius: 1, border: '1px solid rgba(255,152,0,0.3)' }}>
+                                    <Typography variant="body2" color="warning.main" fontWeight="bold">Escalating Poll (Automatic)</Typography>
+                                    <Typography variant="body2" color="warning.main">
+                                        When a critical device goes offline, polling automatically increases to every 30 seconds until the device recovers or 20 attempts are reached.
+                                    </Typography>
+                                </Box>
                             </Grid>
+                            
                             <Grid item xs={12}>
+                                <Typography variant="subtitle2" color="primary" sx={{ mb: 2 }}>--- Segment Scanning ---</Typography>
+                                <TextField
+                                    fullWidth type="number"
+                                    label="Segment Scan Interval (Seconds)" 
+                                    helperText="How often to scan all segments and ping non-critical devices. Recommended: 10-15 minutes (600-900s) for SMB networks."
+                                    value={polling.segment_scan_interval} 
+                                    onChange={(e) => setPolling({ ...polling, segment_scan_interval: e.target.value })}
+                                    inputProps={{ min: 300, max: 3600 }}
+                                />
+                            </Grid>
+
+                            <Grid item xs={12}>
+                                <Typography variant="subtitle2" color="primary" sx={{ mb: 2 }}>--- UniFi Integration ---</Typography>
                                 <TextField
                                     select fullWidth label="UniFi Data Refresh Interval" helperText="How often to pull updated data from UniFi API"
                                     value={polling.unifi_interval_ms} onChange={(e) => setPolling({ ...polling, unifi_interval_ms: e.target.value })}
@@ -819,7 +844,6 @@ export default function Settings() {
                                     <MenuItem value="1800000">30 Minutes</MenuItem>
                                     <MenuItem value="3600000">1 Hour</MenuItem>
                                 </TextField>
-
                             </Grid>
                         </Grid>
 
@@ -875,10 +899,55 @@ export default function Settings() {
                             </Grid>
                         </Grid>
 
-                        <Box sx={{ mt: 4 }}>
-                            <Button variant="contained" startIcon={<SaveIcon />} onClick={() => savePolling.mutate(polling)} disabled={savePolling.isPending}>
-                                {savePolling.isPending ? 'Saving…' : 'Save and Restart Jobs'}
-                            </Button>
+                        <Box sx={{ mt: 4, display: 'flex', flexDirection: 'column', gap: 3 }}>
+                            <Box>
+                                <Button variant="contained" startIcon={<SaveIcon />} onClick={() => savePolling.mutate(polling)} disabled={savePolling.isPending}>
+                                    {savePolling.isPending ? 'Saving…' : 'Save and Restart Jobs'}
+                                </Button>
+                            </Box>
+
+                            <Box sx={{ mt: 2, p: 2, bgcolor: 'rgba(255,255,255,0.03)', borderRadius: 1 }}>
+                                <Typography variant="subtitle2" color="primary" sx={{ mb: 2 }}>--- Current Status Display ---</Typography>
+                                {pollingStatus ? (
+                                    <>
+                                        <Typography variant="body2" sx={{ mb: 1 }}>
+                                            <strong>Critical Poll:</strong> {pollingStatus.criticalPoll?.running ? 'Running' : 'Stopped'} — 
+                                            next check: {
+                                                pollingStatus.criticalPoll?.nextRunExpectedAt 
+                                                    ? `${Math.max(0, Math.floor((pollingStatus.criticalPoll.nextRunExpectedAt - Date.now()) / 1000))}s`
+                                                    : 'Unknown'
+                                            }
+                                        </Typography>
+                                        <Typography variant="body2" sx={{ mb: 2 }}>
+                                            <strong>Segment Scan:</strong> {pollingStatus.segmentScan?.running ? 'Running' : 'Stopped'} — 
+                                            next check: {
+                                                pollingStatus.segmentScan?.nextRunExpectedAt 
+                                                    ? `${Math.max(0, Math.floor((pollingStatus.segmentScan.nextRunExpectedAt - Date.now()) / 1000))}s`
+                                                    : 'Unknown'
+                                            }
+                                        </Typography>
+                                        
+                                        {pollingStatus.escalatingPolls && pollingStatus.escalatingPolls.length > 0 && (
+                                            <Box sx={{ mt: 2, p: 2, bgcolor: 'rgba(255,152,0,0.1)', borderRadius: 1, border: '1px solid rgba(255,152,0,0.3)' }}>
+                                                <Typography variant="body2" color="warning.main" fontWeight="bold" sx={{ mb: 1 }}>
+                                                    ⚡ Escalating Poll Active:
+                                                </Typography>
+                                                <ul style={{ margin: 0, paddingLeft: 20 }}>
+                                                    {pollingStatus.escalatingPolls.map(poll => (
+                                                        <li key={poll.deviceId}>
+                                                            <Typography variant="body2" color="warning.main">
+                                                                {poll.name} (attempt {poll.attempts}/{poll.max})
+                                                            </Typography>
+                                                        </li>
+                                                    ))}
+                                                </ul>
+                                            </Box>
+                                        )}
+                                    </>
+                                ) : (
+                                    <Typography variant="body2" color="text.secondary">Loading status map...</Typography>
+                                )}
+                            </Box>
                         </Box>
                     </Box>
                 </TabPanel>

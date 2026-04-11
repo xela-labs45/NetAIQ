@@ -2,6 +2,7 @@ const ping = require('ping');
 const db = require('../db/database');
 const alertService = require('./alertService');
 const telegramService = require('./telegramService');
+const escalatingPollManager = require('./EscalatingPollManager');
 
 async function performPing(device) {
     try {
@@ -67,6 +68,11 @@ async function pingDevice(device, fastify) {
             } catch (err) {
                 console.error('Telegram critical-offline error (non-blocking):', err.message);
             }
+            
+            // Start escalating poll
+            if (fastify) {
+                escalatingPollManager.startEscalation(device, fastify);
+            }
         }
     } else if (!wasUp && isUp && lastPing) {
         // Device came back up
@@ -95,6 +101,9 @@ async function pingDevice(device, fastify) {
             } catch (err) {
                 console.error('Telegram critical-online error (non-blocking):', err.message);
             }
+            
+            // Stop escalating poll
+            escalatingPollManager.stopEscalation(device.id, 'device came back online');
         }
     } else if (isUp && result.latency_ms > 200) {
         // High latency

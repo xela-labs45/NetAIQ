@@ -101,10 +101,23 @@ module.exports = async function (fastify, opts) {
         saveSettings(request.body);
 
         // Restart jobs with new intervals
-        require('../jobs/pingJob')(fastify);
+        require('../jobs/criticalPingJob').start(fastify);
+        require('../jobs/scanJob').start(fastify);
         require('../jobs/unifiJob')(fastify);
 
         reply.send({ success: true });
+    });
+
+    fastify.get('/polling-status', async (request, reply) => {
+        const escalatingPollManager = require('../services/EscalatingPollManager');
+        const criticalPingJob = require('../jobs/criticalPingJob');
+        const scanJob = require('../jobs/scanJob');
+
+        reply.send({
+            criticalPoll: criticalPingJob.getStatus(),
+            segmentScan: scanJob.getStatus(),
+            escalatingPolls: escalatingPollManager.getEscalatingStatus()
+        });
     });
 
     fastify.post('/test-unifi', async (request, reply) => {
