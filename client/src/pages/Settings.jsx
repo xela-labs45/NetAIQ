@@ -64,6 +64,10 @@ export default function Settings() {
         telegram_bot_token: '', telegram_chat_id: '', telegram_alerts_enabled: false, telegram_ai_enhanced: false
     });
 
+    const [general, setGeneral] = useState({
+        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone
+    });
+
     // Handle deep-linking to specific tabs (FIX 7)
     useEffect(() => {
         if (location.state?.tab !== undefined) {
@@ -170,6 +174,10 @@ export default function Settings() {
             ai_analysis_interval_ms: s.ai_analysis_interval_ms || '21600000', // 6 hours
             ai_enabled: s.ai_enabled !== '0'
         });
+
+        setGeneral({
+            timezone: s.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone
+        });
     }, [settingsData]);
 
     const showToast = (message, severity = 'success') => {
@@ -198,6 +206,14 @@ export default function Settings() {
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['settings'] });
             showToast('Telegram settings saved successfully');
+        }
+    });
+
+    const saveGeneral = useMutation({
+        mutationFn: (data) => axios.put('/api/v1/settings/general', data),
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: ['settings'] });
+            showToast('General settings saved successfully');
         }
     });
 
@@ -331,6 +347,7 @@ export default function Settings() {
             <Card sx={{ mt: 3 }}>
                 <Box sx={{ borderBottom: 1, borderColor: 'divider' }}>
                     <Tabs value={tabIndex} onChange={(e, v) => setTabIndex(v)} aria-label="settings tabs">
+                        <Tab label="General" />
                         <Tab label={
                             <Box sx={{ display: 'flex', alignItems: 'center' }}>
                                 UniFi Controller
@@ -355,8 +372,41 @@ export default function Settings() {
                     </Tabs>
                 </Box>
 
-                {/* UNIFI TAB */}
+                {/* GENERAL TAB */}
                 <TabPanel value={tabIndex} index={0}>
+                    <Box sx={{ p: 4, maxWidth: 600 }}>
+                        <Typography variant="h6" gutterBottom>General Settings</Typography>
+                        <Typography variant="body2" color="text.secondary" sx={{ mb: 4 }}>
+                            Configure system-wide localization and identification settings.
+                        </Typography>
+
+                        <Grid container spacing={3}>
+                            <Grid item xs={12}>
+                                <Autocomplete
+                                    options={Intl.supportedValuesOf('timeZone')}
+                                    value={general.timezone}
+                                    onChange={(e, newValue) => setGeneral({ ...general, timezone: newValue })}
+                                    renderInput={(params) => (
+                                        <TextField 
+                                            {...params} 
+                                            label="System Timezone" 
+                                            helperText="Used for Telegram and Email notification timestamps."
+                                        />
+                                    )}
+                                />
+                            </Grid>
+                        </Grid>
+
+                        <Box sx={{ mt: 4 }}>
+                            <Button variant="contained" startIcon={<SaveIcon />} onClick={() => saveGeneral.mutate(general)} disabled={saveGeneral.isPending}>
+                                {saveGeneral.isPending ? 'Saving…' : 'Save Settings'}
+                            </Button>
+                        </Box>
+                    </Box>
+                </TabPanel>
+
+                {/* UNIFI TAB */}
+                <TabPanel value={tabIndex} index={1}>
                     <Box sx={{ p: 4, maxWidth: 600 }}>
                         <Typography variant="h6" gutterBottom>UniFi Controller Configuration</Typography>
                         <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
@@ -452,7 +502,7 @@ export default function Settings() {
                 </TabPanel>
 
                 {/* EMAIL TAB */}
-                <TabPanel value={tabIndex} index={1}>
+                <TabPanel value={tabIndex} index={2}>
                     <Box sx={{ p: 4, maxWidth: 800 }}>
                         <Typography variant="h6" gutterBottom>SMTP Email Server</Typography>
                         <Grid container spacing={3} sx={{ mb: 4 }}>
@@ -513,7 +563,7 @@ export default function Settings() {
                 </TabPanel>
 
                 {/* TELEGRAM TAB */}
-                <TabPanel value={tabIndex} index={2}>
+                <TabPanel value={tabIndex} index={3}>
                     <Box sx={{ p: 4, maxWidth: 600 }}>
                         <Typography variant="h6" gutterBottom>Telegram Bot Notifications</Typography>
                         <Typography variant="body2" color="text.secondary" sx={{ mb: 4 }}>
@@ -648,7 +698,7 @@ export default function Settings() {
                 </TabPanel>
 
                 {/* AI TAB */}
-                <TabPanel value={tabIndex} index={3}>
+                <TabPanel value={tabIndex} index={4}>
                     <Box sx={{ p: 4, maxWidth: 800 }}>
                         <Typography variant="h6" gutterBottom>AI Assistant Configuration</Typography>
                         <Typography variant="body2" color="text.secondary" sx={{ mb: 4 }}>
@@ -796,7 +846,7 @@ export default function Settings() {
                 </TabPanel>
 
                 {/* POLLING TAB */}
-                <TabPanel value={tabIndex} index={4}>
+                <TabPanel value={tabIndex} index={5}>
                     <Box sx={{ p: 4, maxWidth: 700 }}>
                         <Typography variant="h6" gutterBottom>Background Jobs Configuration</Typography>
                         <Grid container spacing={4}>
@@ -953,7 +1003,7 @@ export default function Settings() {
                 </TabPanel>
 
                 {/* ACCOUNT TAB */}
-                <TabPanel value={tabIndex} index={5}>
+                <TabPanel value={tabIndex} index={6}>
                     <Box sx={{ p: 4, maxWidth: 600 }}>
                         <Typography variant="h6" gutterBottom>Admin Account</Typography>
                         <Box sx={{ mb: 4, p: 2, bgcolor: 'rgba(255,255,255,0.03)', borderRadius: 1 }}>

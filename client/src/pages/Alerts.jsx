@@ -61,7 +61,7 @@ export default function Alerts() {
       field: 'created_at',
       headerName: 'Time',
       width: 200,
-      renderCell: (params) => new Date(params.value).toLocaleString()
+      renderCell: (params) => new Date(params.value).toLocaleString('en-GB', { hour12: false }).replace(/\//g, '-').replace(',', '')
     },
     {
       field: 'is_read',

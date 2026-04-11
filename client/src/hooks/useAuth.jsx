@@ -33,7 +33,7 @@ export function AuthProvider({ children }) {
         if (res.data.must_change_password) {
             navigate('/settings', {
                 state: {
-                    tab: 5,
+                    tab: 6,
                     toast: 'Please set a new password — your account is still using the default credentials.'
                 }
             });

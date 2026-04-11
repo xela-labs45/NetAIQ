@@ -97,6 +97,11 @@ module.exports = async function (fastify, opts) {
     });
 
 
+    fastify.put('/general', async (request, reply) => {
+        saveSettings(request.body);
+        reply.send({ success: true });
+    });
+
     fastify.put('/polling', async (request, reply) => {
         saveSettings(request.body);
 

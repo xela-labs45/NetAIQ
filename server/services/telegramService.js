@@ -1,4 +1,5 @@
 const db = require('../db/database');
+const { formatInUserTimezone } = require('../utils/dateFormatter');
 
 // Lazy-load aiService to avoid circular dependency
 let _aiService = null;
@@ -98,7 +99,7 @@ function formatDowntime(ms) {
 }
 
 function formatTimestamp() {
-    return new Date().toISOString().replace('T', ' ').substring(0, 19);
+    return formatInUserTimezone(new Date());
 }
 
 /**
@@ -200,7 +201,7 @@ async function sendApOffline(ap) {
     if (!isEnabled()) return;
 
     const lastSeenFormatted = ap.last_seen
-        ? new Date(ap.last_seen * 1000).toISOString().replace('T', ' ').substring(0, 19)
+        ? formatInUserTimezone(ap.last_seen * 1000)
         : null;
 
     const baseMessage = [

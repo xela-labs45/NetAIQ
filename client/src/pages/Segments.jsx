@@ -348,7 +348,7 @@ export default function Segments() {
                       return scans.map(s => (
                         <Box key={s.id} sx={{ p: 1, mb: 1, bgcolor: 'background.paper', borderRadius: 1 }}>
                           <Typography variant="caption" display="block">
-                            {new Date(s.scanned_at).toLocaleString()}
+                            {new Date(s.scanned_at).toLocaleString('en-GB', { hour12: false }).replace(/\//g, '-').replace(',', '')}
                           </Typography>
                           <Box sx={{ display: 'flex', gap: 1, mt: 0.5 }}>
                             <Chip size="small" label={`Found ${s.hosts_found}`} />

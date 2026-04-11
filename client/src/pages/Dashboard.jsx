@@ -427,7 +427,7 @@ export default function Dashboard() {
 
                             let subText;
                             if (seg.scan_total > 0 && seg.last_scan_at) {
-                                subText = `last scan: ${new Date(seg.last_scan_at).toLocaleString()}`;
+                                subText = `last scan: ${new Date(seg.last_scan_at).toLocaleString('en-GB', { hour12: false }).replace(/\//g, '-').replace(',', '')}`;
                             } else {
                                 subText = <React.Fragment>Run a <Link component={RouterLink} to="/segments" sx={{ color: 'primary.main', textDecoration: 'none', '&:hover': { textDecoration: 'underline' } }}>scan</Link></React.Fragment>;
                             }
@@ -505,18 +505,7 @@ export default function Dashboard() {
                                         </Typography>
                                     </Box>
                                     <Typography variant="caption" sx={{ fontSize: '0.68rem', color: 'text.disabled', ml: 1, flexShrink: 0 }}>
-                                        {(() => {
-                                            const d = new Date(alert.created_at);
-                                            const now = new Date();
-                                            const time = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-                                            const isToday = d.toDateString() === now.toDateString();
-                                            const yesterday = new Date(now);
-                                            yesterday.setDate(now.getDate() - 1);
-                                            const isYesterday = d.toDateString() === yesterday.toDateString();
-                                            if (isToday) return `Today ${time}`;
-                                            if (isYesterday) return `Yesterday ${time}`;
-                                            return d.toLocaleDateString([], { month: 'short', day: 'numeric' }) + ` ${time}`;
-                                        })()}
+                                        {new Date(alert.created_at).toLocaleString('en-GB', { hour12: false }).replace(/\//g, '-').replace(',', '')}
                                     </Typography>
                                 </Box>
                             ))}

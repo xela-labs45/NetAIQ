@@ -1,5 +1,6 @@
 const db = require('../db/database');
 const nodemailer = require('nodemailer');
+const { formatInUserTimezone } = require('../utils/dateFormatter');
 
 function getSettings() {
     const settings = db.prepare('SELECT key, value FROM settings').all();
@@ -37,7 +38,7 @@ async function sendEmailAlert(alert) {
 Type: ${alert.alert_type}
 Severity: ${alert.severity}
 Message: ${alert.message}
-Time: ${new Date().toISOString()}
+Time: ${formatInUserTimezone(new Date())}
 `
         });
         return true;
