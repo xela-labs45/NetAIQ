@@ -16,7 +16,9 @@
 
 ## ✨ Features
 
-- 📡 **Real-time Device Monitoring** — Smart ICMP ping checks (prioritizes critical/down devices), live status, and interactive "Live Devices" modal
+- 📡 **Split-Interval Monitoring** — Independent high-frequency polling for critical devices and periodic full-segment scans (skips critical devices for efficiency)
+- ⚡ **Escalating Poll Mode** — Automatically switches to 30s polling when a critical device goes offline to detect fast recovery (capped at 20 attempts)
+- 📊 **Live Job Status** — Real-time countdowns and escalation status tracking directly in the Settings UI
 - 🏢 **Network Segments** — Organise devices by subnet (CIDR), with automated host discovery scanning and strict validation
 - � **MAC OUI Lookup** — 1,100+ device manufacturers recognized instantly (IoT, mobile, gaming, network, servers, cameras)
 - � **UniFi Integration** — Full health oversight including WAN stats, Access Point status, and throughput monitoring
@@ -44,7 +46,7 @@
 | **Database** | SQLite (`better-sqlite3`) |
 | **Auth** | JWT (`@fastify/jwt`), HTTP-only cookies, Rate Limiting |
 | **Validation** | `zod` (Strict schema-based input validation) |
-| **Monitoring** | `ping`, `node-cron`, `p-limit`, `netmask` |
+| **Monitoring** | `ping`, `setTimeout`-based precise schedulers, `p-limit`, `netmask` |
 | **Notifications** | Nodemailer (SMTP), Telegram Bot API |
 | **AI Providers** | Anthropic (e.g., Claude 3.5), OpenRouter (e.g., Llama 3, Mistral) |
 | **Deployment** | Docker, Docker Compose |
@@ -131,7 +133,8 @@ All settings can be configured from the **Settings** page in the UI after loggin
 | **UniFi Controller** | URL and credentials for UniFi integration (Managed in UI) |
 | **SMTP / Email** | Mail server and recipient settings for alerts (Managed in UI) |
 | **Telegram** | Bot token and chat ID for real-time Telegram notifications (Managed in UI) |
-| **Ping Interval** | How often to ping tracked devices (default: 60s) |
+| **Critical Ping Interval** | How often to ping devices marked as critical (default: 120s) |
+| **Segment Scan Interval** | How often to sweep all subnets for non-critical devices (default: 15m) |
 | **UniFi Sync Interval** | How often to pull data from UniFi (default: 5 min) |
 | **Alert Cooldown** | Prevents duplicate alerts for a device within this window (default: 15 min) |
 | **Ping History Retention** | Days to keep historical ping latency data (default: 90 days) |
@@ -181,6 +184,28 @@ Telegram notifications are sent for the following events:
 
 > [!NOTE]
 > Telegram alerts fire only on **status changes** (online → offline or offline → online), not on every scan cycle. Telegram failures are non-blocking and will never delay or crash the monitoring system.
+
+---
+
+## 🔍 Scanning Architecture
+
+NetMon uses a split-polling strategy to balance low-latency monitoring for critical infrastructure with broad visibility across multiple subnets.
+
+### 1. Critical Device Polling
+- **Scope**: Only devices tagged as "Critical" in the UI.
+- **Interval**: Configurable (default 120s).
+- **Behavior**: Runs independently of segment scans to ensure high-priority devices are always checked on time.
+
+### 2. Segment Scanning (Subnet Sweeps)
+- **Scope**: Every IP within your registered CIDR segments.
+- **Exclusion**: Automatically skips Critical devices to prevent redundant pings.
+- **Staggering**: If a Critical Poll is running, the Segment Scan will pause or postpone its start to prioritize system resources and network bandwidth.
+
+### 3. Escalating Poll Mode
+- **Triggers**: Automatically activates when a Critical device transitions from Online to Offline.
+- **Frequency**: Polls only the affected device(s) every **30 seconds**.
+- **The "Cap"**: To avoid indefinite flooding, escalation stops after **20 attempts** (~10 minutes). After the cap, the system reverts to the standard Critical Device interval for that device.
+- **Visuals**: Active escalations are shown with real-time attempt counts in **Settings > Polling Intervals**.
 
 ---
 
