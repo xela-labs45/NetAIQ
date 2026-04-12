@@ -505,7 +505,18 @@ export default function Dashboard() {
                                         </Typography>
                                     </Box>
                                     <Typography variant="caption" sx={{ fontSize: '0.68rem', color: 'text.disabled', ml: 1, flexShrink: 0 }}>
-                                        {new Date(alert.created_at).toLocaleString('en-GB', { hour12: false }).replace(/\//g, '-').replace(',', '')}
+                                        {(() => {
+                                            const d = new Date(alert.created_at);
+                                            const now = new Date();
+                                            const time = d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false });
+                                            const isToday = d.toDateString() === now.toDateString();
+                                            const yesterday = new Date(now);
+                                            yesterday.setDate(now.getDate() - 1);
+                                            const isYesterday = d.toDateString() === yesterday.toDateString();
+                                            if (isToday) return `Today ${time}`;
+                                            if (isYesterday) return `Yesterday ${time}`;
+                                            return d.toLocaleString('en-GB', { hour12: false }).replace(/\//g, '-').replace(',', '');
+                                        })()}
                                     </Typography>
                                 </Box>
                             ))}
