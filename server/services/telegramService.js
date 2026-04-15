@@ -1,5 +1,5 @@
 const db = require('../db/database');
-const { formatInUserTimezone } = require('../utils/dateFormatter');
+const { formatInUserTimezone, normalizeDate } = require('../utils/dateFormatter');
 
 // Lazy-load aiService to avoid circular dependency
 let _aiService = null;
@@ -156,7 +156,7 @@ async function sendCriticalDeviceOffline(device, segmentName) {
         segment_name: segmentName,
         segment_cidr: segmentCidr,
         last_seen: device.last_seen,
-        minutes_offline: device.last_seen ? Math.round((Date.now() - new Date(device.last_seen).getTime()) / 60000) : null
+        minutes_offline: device.last_seen ? Math.round((Date.now() - normalizeDate(device.last_seen).getTime()) / 60000) : null
     };
 
     const message = await appendAiSection(baseMessage, 'critical_device_offline', aiContext);
@@ -201,7 +201,7 @@ async function sendApOffline(ap) {
     if (!isEnabled()) return;
 
     const lastSeenFormatted = ap.last_seen
-        ? formatInUserTimezone(ap.last_seen * 1000)
+        ? formatInUserTimezone(ap.last_seen)
         : null;
 
     const baseMessage = [
@@ -219,7 +219,7 @@ async function sendApOffline(ap) {
         name: ap.name,
         mac: ap.mac,
         last_seen: lastSeenFormatted,
-        minutes_offline: ap.last_seen ? Math.round((Date.now() / 1000 - ap.last_seen) / 60) : null
+        minutes_offline: ap.last_seen ? Math.round((Date.now() - normalizeDate(ap.last_seen).getTime()) / 60000) : null
     };
 
     const message = await appendAiSection(baseMessage, 'ap_offline', aiContext);
