@@ -90,12 +90,26 @@ async function pingDevice(device, fastify) {
                 const segment = device.segment_id
                     ? db.prepare('SELECT name FROM segments WHERE id = ?').get(device.segment_id)
                     : null;
-                // Calculate downtime from last UP ping
-                const lastUpPing = db.prepare(
-                    "SELECT timestamp FROM ping_history WHERE device_id = ? AND status = 'up' ORDER BY timestamp DESC LIMIT 1 OFFSET 1"
-                ).get(device.id);
-                const downtimeMs = lastUpPing?.timestamp
-                    ? Date.now() - new Date(lastUpPing.timestamp).getTime()
+                // Calculate downtime: find the first DOWN ping in the current sequence
+                // 1. Find the last 'up' ping that occurred BEFORE the current one
+                const lastBeforeOutage = db.prepare(`
+                    SELECT timestamp FROM ping_history 
+                    WHERE device_id = ? AND status = 'up' AND timestamp < (
+                        SELECT MAX(timestamp) FROM ping_history WHERE device_id = ? AND status = 'up'
+                    )
+                    ORDER BY timestamp DESC LIMIT 1
+                `).get(device.id, device.id);
+
+                // 2. Find the earliest 'down' ping AFTER that last 'up' (or from the beginning if no previous 'up')
+                const outageStart = db.prepare(`
+                    SELECT timestamp FROM ping_history 
+                    WHERE device_id = ? AND status = 'down' 
+                    ${lastBeforeOutage ? 'AND timestamp > ?' : ''}
+                    ORDER BY timestamp ASC LIMIT 1
+                `).get(device.id, ...(lastBeforeOutage ? [lastBeforeOutage.timestamp] : []));
+
+                const downtimeMs = outageStart?.timestamp
+                    ? Date.now() - new Date(outageStart.timestamp + 'Z').getTime()
                     : null;
                 telegramService.sendCriticalDeviceOnline(device, segment?.name || null, downtimeMs);
             } catch (err) {

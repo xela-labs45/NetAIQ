@@ -26,6 +26,12 @@ async function runPingCycle(fastify) {
             
             const limit = pLimit(5); // Process in batches of 5
             const tasks = devicesToPing.map(device => limit(async () => {
+                // BUG 1 & 5 FIX: Re-check escalation status just before pinging
+                // This prevents race conditions if the device started escalating after the cycle began.
+                if (escalatingPollManager.isEscalating(device.id)) {
+                    return;
+                }
+
                 let retries = 2;
                 while (retries >= 0) {
                     try {

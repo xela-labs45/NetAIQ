@@ -16,33 +16,37 @@ class EscalatingPollManager {
         fastify.log.warn(`Starting escalating poll for critical device: ${device.hostname || device.ip_address}`);
 
         const timer = setInterval(async () => {
-            const pollData = this.offlineDevices.get(device.id);
-            if (!pollData) {
+            const currentPoll = this.offlineDevices.get(device.id);
+            if (!currentPoll) {
                 clearInterval(timer);
                 return;
             }
 
-            pollData.attempts += 1;
-            fastify.log.info(`Escalating poll for ${device.hostname || device.ip_address} (Attempt ${pollData.attempts}/${this.MAX_ATTEMPTS})`);
+            fastify.log.info(`Escalating poll for ${device.hostname || device.ip_address} (Attempt ${currentPoll.attempts + 1}/${this.MAX_ATTEMPTS})`);
 
             try {
-                // Ping the device
-                // This will use performPing so we don't trigger recursively from pingDevice if we used it.
-                // Wait, if it recovers during escalating poll, we want alertService to know and send "came back online".
-                // We should use pingService.pingDevice(device, fastify) to handle alerts automatically.
-                // But wait, pingDevice itself triggers startEscalation/stopEscalation!
-                // To avoid loops, since isEscalating is checked in criticalPingJob, it's fine if pingDevice calls stopEscalation.
                 const pingService = require('./pingService');
                 await pingService.pingDevice(device, fastify);
+                
+                // BUG 3 FIX: Re-check if we are still escalating after the ping returns
+                // (Recovery logic in pingDevice might have already called stopEscalation)
+                const stillEscalating = this.offlineDevices.get(device.id);
+                if (!stillEscalating) {
+                    clearInterval(timer);
+                    return;
+                }
+
+                // BUG 4 FIX: Only increment attempts if the ping logic itself succeeded
+                stillEscalating.attempts += 1;
+
+                if (stillEscalating.attempts >= this.MAX_ATTEMPTS) {
+                    fastify.log.warn(`Escalating poll for ${device.hostname || device.ip_address} reached max attempts (${this.MAX_ATTEMPTS}). Falling back to normal poll.`);
+                    this.stopEscalation(device.id, 'max attempts reached');
+                }
             } catch (err) {
-                fastify.log.error(`Escalating poll error for ${device.ip_address}: ${err.message}`);
+                // System error (e.g. DB locked) - log it but don't count as a device attempt
+                fastify.log.error(`Escalating poll system error for ${device.ip_address}: ${err.message}`);
             }
-
-            if (pollData && pollData.attempts >= this.MAX_ATTEMPTS) {
-                fastify.log.warn(`Escalating poll for ${device.hostname || device.ip_address} reached max attempts (${this.MAX_ATTEMPTS}). Falling back to normal poll.`);
-                this.stopEscalation(device.id);
-            }
-
         }, this.INTERVAL_MS);
 
         this.offlineDevices.set(device.id, {
