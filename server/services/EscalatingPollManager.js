@@ -1,4 +1,5 @@
-const pingService = require('./pingService');
+// Move require inside the logic to avoid circular dependency with pingService
+// const pingService = require('./pingService');
 
 class EscalatingPollManager {
     constructor() {
@@ -31,7 +32,8 @@ class EscalatingPollManager {
                 // We should use pingService.pingDevice(device, fastify) to handle alerts automatically.
                 // But wait, pingDevice itself triggers startEscalation/stopEscalation!
                 // To avoid loops, since isEscalating is checked in criticalPingJob, it's fine if pingDevice calls stopEscalation.
-                await pingService.pingDevice(device, fastify, this);
+                const pingService = require('./pingService');
+                await pingService.pingDevice(device, fastify);
             } catch (err) {
                 fastify.log.error(`Escalating poll error for ${device.ip_address}: ${err.message}`);
             }
