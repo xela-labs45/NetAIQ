@@ -20,9 +20,9 @@ async function backfillVendors(fastify) {
         let count = 0;
         const updateStmt = db.prepare(`
             UPDATE devices 
-            SET vendor = COALESCE(?, vendor),
-                device_type = COALESCE(?, device_type),
-                os_guess = COALESCE(?, os_guess)
+            SET vendor = COALESCE(vendor, ?),
+                device_type = COALESCE(device_type, ?),
+                os_guess = COALESCE(os_guess, ?)
             WHERE id = ?
         `);
 
