@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
     Dialog, DialogTitle, DialogContent, DialogActions, Box, Typography,
     Tabs, Tab, Table, TableHead, TableBody, TableRow, TableCell, Chip,
@@ -23,10 +23,17 @@ import axios from 'axios';
 import { useSocket } from '../hooks/useSocket';
 import { DEVICE_TYPES, getDeviceTypeIcon } from '../constants/deviceTypes';
 import { formatDistanceToNow } from 'date-fns';
+import { useInfiniteDevices } from '../hooks/useInfiniteDevices';
+import Lottie from 'lottie-react';
+import subtleSpinnerAnimation from '../animations/subtleSpinner.json';
+import emptyStateAnimation from '../animations/emptyState.json';
+import radarPulseAnimation from '../animations/radarPulse.json';
+import { Skeleton } from '@mui/material';
 
 export default function LiveDevicesModal({ open, onClose, defaultTab = 'all' }) {
     const queryClient = useQueryClient();
     const socket = useSocket();
+    const sentinelRef = useRef(null);
 
     // Main UI state
     const [mainTab, setMainTab] = useState('online'); // 'online' | 'discovered'
@@ -36,6 +43,12 @@ export default function LiveDevicesModal({ open, onClose, defaultTab = 'all' }) 
     const [segmentFilter, setSegmentFilter] = useState('all');
     const [aiFilter, setAiFilter] = useState('all');
     const [searchQuery, setSearchQuery] = useState('');
+    const [debouncedSearchQuery, setDebouncedSearchQuery] = useState('');
+
+    useEffect(() => {
+        const timer = setTimeout(() => setDebouncedSearchQuery(searchQuery), 300);
+        return () => clearTimeout(timer);
+    }, [searchQuery]);
 
     // Sorting state (Online tab)
     const [sortBy, setSortBy] = useState('is_registered');
@@ -109,29 +122,46 @@ export default function LiveDevicesModal({ open, onClose, defaultTab = 'all' }) 
         setSortDir('asc');
     }, [connectionFilter]);
 
-    // Query for Online Devices
-    const { data: onlineData, isLoading: onlineLoading, refetch: refetchOnline, isFetching: isOnlineFetching } = useQuery({
-        queryKey: ['liveDevices', connectionFilter],
-        queryFn: () => axios.get(`/api/v1/devices/online?connection=${connectionFilter}`).then(res => res.data),
-        enabled: open && mainTab === 'online'
-    });
+    // Infinite Devices for Online
+    const {
+        devices: onlineDevicesRaw,
+        hasMore: onlineHasMore,
+        loading: isOnlineFetching,
+        initialLoading: onlineLoading,
+        totalCount: onlineTotalCount,
+        loadMore: loadMoreOnline,
+        refetch: refetchOnline
+    } = useInfiniteDevices('online', { connection: connectionFilter }, open && mainTab === 'online');
 
-    // Query for Discovered Devices
-    const { data: discoveredData, isLoading: discoveredLoading, refetch: refetchDiscovered, isFetching: isDiscoveredFetching } = useQuery({
-        queryKey: ['discoveredDevices', connectionFilter, segmentFilter, aiFilter],
-        queryFn: () => {
-            const params = new URLSearchParams();
-            if (connectionFilter === 'wired') params.append('is_wired', 'true');
-            if (connectionFilter === 'wireless') params.append('is_wired', 'false');
-            if (segmentFilter !== 'all') params.append('segment_id', segmentFilter);
-            if (aiFilter === 'identified') params.append('ai_identified', 'true');
-            if (aiFilter === 'unidentified') params.append('ai_identified', 'false');
-            // Hardcode high limit to allow client-side search across all
-            params.append('limit', '5000');
-            return axios.get(`/api/v1/discovery/discovered?${params.toString()}`).then(res => res.data);
-        },
-        enabled: open && mainTab === 'discovered'
-    });
+    // Infinite Devices for Discovered
+    const {
+        devices: discoveredDevicesRaw,
+        hasMore: discoveredHasMore,
+        loading: isDiscoveredFetching,
+        initialLoading: discoveredLoading,
+        totalCount: discoveredTotalCount,
+        loadMore: loadMoreDiscovered,
+        refetch: refetchDiscovered
+    } = useInfiniteDevices('discovered', { 
+        is_wired: connectionFilter === 'wired' ? 'true' : connectionFilter === 'wireless' ? 'false' : 'all',
+        segment_id: segmentFilter,
+        ai_identified: aiFilter === 'identified' ? 'true' : aiFilter === 'unidentified' ? 'false' : 'all',
+        search: debouncedSearchQuery
+    }, open && mainTab === 'discovered');
+
+    useEffect(() => {
+        const observer = new IntersectionObserver(
+            entries => {
+                if (entries[0].isIntersecting) {
+                    if (mainTab === 'online' && onlineHasMore) loadMoreOnline();
+                    if (mainTab === 'discovered' && discoveredHasMore) loadMoreDiscovered();
+                }
+            },
+            { threshold: 0.1 }
+        );
+        if (sentinelRef.current) observer.observe(sentinelRef.current);
+        return () => observer.disconnect();
+    }, [mainTab, onlineHasMore, discoveredHasMore, loadMoreOnline, loadMoreDiscovered]);
 
     // Socket listeners for batch AI progress
     useEffect(() => {
@@ -182,7 +212,7 @@ export default function LiveDevicesModal({ open, onClose, defaultTab = 'all' }) 
     // ==========================================
     // DATA PROCESSING - ONLINE TAB
     // ==========================================
-    const onlineDevices = onlineData?.devices || [];
+    const onlineDevices = onlineDevicesRaw || [];
 
     const handleSort = (column) => {
         if (column === sortBy) setSortDir(sortDir === 'asc' ? 'desc' : 'asc');
@@ -212,20 +242,8 @@ export default function LiveDevicesModal({ open, onClose, defaultTab = 'all' }) 
     // ==========================================
     // DATA PROCESSING - DISCOVERED TAB
     // ==========================================
-    const discoveredDevicesRaw = discoveredData?.devices || [];
-
-    // Client-side search filter
-    const searchedDiscoveredDevices = useMemo(() => {
-        if (!searchQuery) return discoveredDevicesRaw;
-        const lowerQ = searchQuery.toLowerCase();
-        return discoveredDevicesRaw.filter(d =>
-            (d.mac_address && d.mac_address.toLowerCase().includes(lowerQ)) ||
-            (d.last_ip && d.last_ip.includes(lowerQ)) ||
-            (d.hostname && d.hostname.toLowerCase().includes(lowerQ)) ||
-            (d.suggested_name && d.suggested_name.toLowerCase().includes(lowerQ)) ||
-            (d.manufacturer && d.manufacturer.toLowerCase().includes(lowerQ))
-        );
-    }, [discoveredDevicesRaw, searchQuery]);
+    // Client-side search filter is now handled server-side
+    const searchedDiscoveredDevices = discoveredDevicesRaw || [];
 
     const handleDiscSort = (column) => {
         if (column === discSortBy) setDiscSortDir(discSortDir === 'asc' ? 'desc' : 'asc');
@@ -321,8 +339,26 @@ export default function LiveDevicesModal({ open, onClose, defaultTab = 'all' }) 
                 {/* Main Tabs */}
                 <Box sx={{ borderBottom: 1, borderColor: 'divider', px: 2, bgcolor: 'rgba(0,0,0,0.2)' }}>
                     <Tabs value={mainTab} onChange={(e, v) => setMainTab(v)}>
-                        <Tab label={`Online Now`} value="online" sx={{ '&.Mui-selected': { color: '#22c55e' } }} />
-                        <Tab label={`All Discovered (${discoveredData?.devices?.length || 0})`} value="discovered" sx={{ '&.Mui-selected': { color: '#3b82f6' } }} />
+                        <Tab 
+                            label={
+                                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                                    Online Now
+                                    <Chip size="small" label={onlineLoading && open && mainTab === 'online' ? <Skeleton width={20} /> : onlineTotalCount} />
+                                </Box>
+                            } 
+                            value="online" 
+                            sx={{ '&.Mui-selected': { color: '#22c55e' } }} 
+                        />
+                        <Tab 
+                            label={
+                                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                                    All Discovered
+                                    <Chip size="small" label={discoveredLoading && open && mainTab === 'discovered' ? <Skeleton width={20} /> : discoveredTotalCount} />
+                                </Box>
+                            } 
+                            value="discovered" 
+                            sx={{ '&.Mui-selected': { color: '#3b82f6' } }} 
+                        />
                     </Tabs>
                 </Box>
 
@@ -372,8 +408,13 @@ export default function LiveDevicesModal({ open, onClose, defaultTab = 'all' }) 
 
                     {/* ONLINE TAB RENDER */}
                     {mainTab === 'online' && (
-                        (onlineLoading || (!open && isOnlineFetching)) ? (
-                            <Box sx={{ display: 'flex', justifyContent: 'center', p: 4 }}><CircularProgress /></Box>
+                        <>
+                        {onlineLoading ? (
+                            <Box sx={{ p: 2 }}>
+                                {Array.from({ length: 5 }).map((_, i) => (
+                                    <Skeleton key={i} variant="rectangular" height={52} sx={{ mb: 1, borderRadius: 1 }} />
+                                ))}
+                            </Box>
                         ) : (
                             <Table stickyHeader size="small">
                                 <TableHead>
@@ -419,11 +460,25 @@ export default function LiveDevicesModal({ open, onClose, defaultTab = 'all' }) 
                                         </TableRow>
                                     ))}
                                     {onlineDevices.length === 0 && (
-                                        <TableRow><TableCell colSpan={10} align="center" sx={{ py: 3, color: 'text.secondary' }}>No live devices found.</TableCell></TableRow>
+                                        <TableRow>
+                                            <TableCell colSpan={10} align="center" sx={{ py: 6 }}>
+                                                <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', color: 'text.secondary' }}>
+                                                    <Lottie animationData={emptyStateAnimation} style={{ width: 100, height: 100 }} loop={false} />
+                                                    <Typography variant="body2" sx={{ mt: 2 }}>No live devices found</Typography>
+                                                </Box>
+                                            </TableCell>
+                                        </TableRow>
                                     )}
                                 </TableBody>
                             </Table>
-                        )
+                        )}
+                        {isOnlineFetching && !onlineLoading && (
+                            <Box sx={{ display: 'flex', justifyContent: 'center', py: 2 }}>
+                                <Lottie animationData={subtleSpinnerAnimation} style={{ width: 40, height: 40 }} loop={true} />
+                            </Box>
+                        )}
+                        <div ref={sentinelRef} style={{ height: 1 }} />
+                        </>
                     )}
 
                     {/* DISCOVERED TAB RENDER */}
@@ -440,8 +495,12 @@ export default function LiveDevicesModal({ open, onClose, defaultTab = 'all' }) 
                                 </Typography>
                             </Box>
                         )}
-                        {(discoveredLoading) ? (
-                            <Box sx={{ display: 'flex', justifyContent: 'center', p: 4 }}><CircularProgress /></Box>
+                        {discoveredLoading ? (
+                            <Box sx={{ p: 2 }}>
+                                {Array.from({ length: 5 }).map((_, i) => (
+                                    <Skeleton key={i} variant="rectangular" height={52} sx={{ mb: 1, borderRadius: 1 }} />
+                                ))}
+                            </Box>
                         ) : (
                             <Table stickyHeader size="small">
                                 <TableHead>
@@ -547,12 +606,24 @@ export default function LiveDevicesModal({ open, onClose, defaultTab = 'all' }) 
                                         );
                                     })}
                                     {sortedDiscoveredDevices.length === 0 && (
-                                        <TableRow><TableCell colSpan={10} align="center" sx={{ py: 3, color: 'text.secondary' }}>No discovered devices match your filters.</TableCell></TableRow>
+                                        <TableRow>
+                                            <TableCell colSpan={10} align="center" sx={{ py: 6 }}>
+                                                <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', color: 'text.secondary' }}>
+                                                    <Lottie animationData={emptyStateAnimation} style={{ width: 100, height: 100 }} loop={false} />
+                                                    <Typography variant="body2" sx={{ mt: 2 }}>No devices found</Typography>
+                                                </Box>
+                                            </TableCell>
+                                        </TableRow>
                                     )}
                                 </TableBody>
                             </Table>
-                        )
-                    }
+                        )}
+                        {isDiscoveredFetching && !discoveredLoading && (
+                            <Box sx={{ display: 'flex', justifyContent: 'center', py: 2 }}>
+                                <Lottie animationData={subtleSpinnerAnimation} style={{ width: 40, height: 40 }} loop={true} />
+                            </Box>
+                        )}
+                        <div ref={sentinelRef} style={{ height: 1 }} />
                     </> )}
                 </DialogContent>
 

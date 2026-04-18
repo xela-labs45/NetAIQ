@@ -67,15 +67,37 @@ module.exports = async function (fastify, opts) {
             params.push(term, term, term);
         }
 
+        // First get total count
+        let countQuery = query;
+        // Strip out the SELECT ... FROM down to SELECT count(*) FROM
+        countQuery = countQuery.replace(/SELECT dd\.\*.*?FROM discovered_devices dd/s, 'SELECT count(*) as total FROM discovered_devices dd');
+        const totalResult = db.prepare(countQuery).get(...params);
+        const total = totalResult ? totalResult.total : 0;
+
+        // Apply pagination
+        const pageNum = parseInt(request.query.page || 1, 10);
+        const limitNum = parseInt(limit, 10);
+        // Use provided offset if there, otherwise calculate from page
+        const offsetNum = parseInt(offset, 10) !== 0 ? parseInt(offset, 10) : (pageNum - 1) * limitNum;
+
         query += ` ORDER BY dd.last_seen DESC LIMIT ? OFFSET ?`;
-        params.push(parseInt(limit, 10), parseInt(offset, 10));
+        params.push(limitNum, offsetNum);
 
         const devices = db.prepare(query).all(...params).map(d => ({
             ...d,
             is_wired: d.is_wired === 1 ? true : d.is_wired === 0 ? false : null,
             ai_identified: d.ai_identified === 1
         }));
-        return reply.send({ devices });
+        
+        return reply.send({ 
+            devices,
+            pagination: {
+                page: pageNum,
+                limit: limitNum,
+                total,
+                hasMore: offsetNum + limitNum < total
+            } 
+        });
     });
 
     // ─── Discovery Stats ────────────────────────────────────────

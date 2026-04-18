@@ -8,6 +8,8 @@ import LiveDevicesModal from '../components/LiveDevicesModal';
 import ApDevicesModal from '../components/ApDevicesModal';
 import { ErrorBoundary } from 'react-error-boundary';
 import { PageErrorFallback } from '../App';
+import AppLoader from '../components/AppLoader';
+import { Skeleton } from '@mui/material';
 import { useSocket } from '../hooks/useSocket';
 import {
     Computer, Warning,
@@ -46,59 +48,62 @@ export default function Dashboard() {
         return () => socket.off('alert:new', handleApAlert);
     }, [socket, queryClient]);
 
-    const { data: devicesData } = useQuery({
+    const { data: devicesData, isLoading: devicesLoading } = useQuery({
         queryKey: ['devices'],
         queryFn: () => axios.get('/api/v1/devices').then(res => res.data),
         refetchInterval: 10000
     });
 
-    const { data: onlineData } = useQuery({
+    const { data: onlineData, isLoading: onlineLoading } = useQuery({
         queryKey: ['devices', 'online'],
         queryFn: () => axios.get('/api/v1/devices/online').then(res => res.data),
         refetchInterval: 10000
     });
 
-    const { data: counts } = useQuery({
+    const { data: counts, isLoading: countsLoading } = useQuery({
         queryKey: ['devices', 'online', 'count'],
         queryFn: () => axios.get('/api/v1/devices/online/count').then(res => res.data),
         refetchInterval: 10000
     });
 
-    const { data: discoveryStats } = useQuery({
+    const { data: discoveryStats, isLoading: discoveryStatsLoading } = useQuery({
         queryKey: ['discovery', 'stats'],
         queryFn: () => axios.get('/api/v1/discovery/discovered/stats').then(res => res.data),
         refetchInterval: 30000
     });
 
-    const { data: segmentsData } = useQuery({
+    const { data: segmentsData, isLoading: segmentsLoading } = useQuery({
         queryKey: ['segments'],
         queryFn: () => axios.get('/api/v1/segments').then(res => res.data),
         refetchInterval: 30000
     });
 
-    const { data: alertsData } = useQuery({
+    const { data: alertsData, isLoading: alertsLoading } = useQuery({
         queryKey: ['alerts', 'recent'],
         queryFn: () => axios.get('/api/v1/alerts?unread=false').then(res => res.data),
         refetchInterval: 10000
     });
 
-    const { data: unreadAlerts } = useQuery({
+    const { data: unreadAlerts, isLoading: unreadAlertsLoading } = useQuery({
         queryKey: ['alerts', 'count'],
         queryFn: () => axios.get('/api/v1/alerts/count').then(res => res.data),
         refetchInterval: 10000
     });
 
-    const { data: wlanHealthData } = useQuery({
+    const { data: wlanHealthData, isLoading: wlanLoading } = useQuery({
         queryKey: ['wlanHealth'],
         queryFn: () => axios.get('/api/v1/unifi/wlan').then(res => res.data),
         refetchInterval: 60000
     });
 
-    const { data: unifiSettings } = useQuery({
+    const { data: unifiSettings, isLoading: settingsLoading } = useQuery({
         queryKey: ['settings', 'unifi'],
         queryFn: () => axios.get('/api/v1/settings').then(res => res.data),
         staleTime: Infinity
     });
+
+    const globalLoading = devicesLoading || onlineLoading || countsLoading || discoveryStatsLoading || segmentsLoading || alertsLoading || wlanLoading;
+
 
     const devices = devicesData?.devices || [];
     const onlineDevices = onlineData?.devices || [];
@@ -180,7 +185,15 @@ export default function Dashboard() {
     };
 
     return (
-        <Box>
+        <Box sx={{ 
+            '& .MuiSkeleton-root': {
+                backgroundColor: 'rgba(255,255,255,0.08)',
+                '&::after': {
+                    background: `linear-gradient(90deg, transparent, rgba(255,255,255,0.06), transparent)`
+                }
+            } 
+        }}>
+            <AppLoader appLoading={globalLoading && !devicesData} />
             <Typography variant="h4" gutterBottom fontWeight="bold">Dashboard</Typography>
 
             {/* ── ROW 1: Connectivity Summary (4 cards) ── */}
@@ -194,6 +207,7 @@ export default function Dashboard() {
                         icon={<DevicesIcon />}
                         onClick={() => handleOpenLiveModal('all')}
                         hoverColor="rgba(59, 130, 246, 0.5)"
+                        loading={globalLoading}
                     />
                 </Grid>
                 <Grid item xs={12} sm={6} md={3}>
@@ -205,6 +219,7 @@ export default function Dashboard() {
                         icon={<EthernetIcon />}
                         onClick={() => handleOpenLiveModal('wired')}
                         hoverColor="rgba(34, 197, 94, 0.5)"
+                        loading={globalLoading}
                         extraAction={
                             <Link
                                 component="button"
@@ -226,6 +241,7 @@ export default function Dashboard() {
                         icon={<WifiIcon />}
                         onClick={() => handleOpenLiveModal('wireless')}
                         hoverColor="rgba(6, 182, 212, 0.5)"
+                        loading={globalLoading}
                         extraAction={
                             <Link
                                 component="button"
@@ -264,10 +280,15 @@ export default function Dashboard() {
                         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1.5 }}>
                             <Box>
                                 <Typography variant="h4" fontWeight="bold">
-                                    {num_ap}
+                                    {globalLoading ? <Skeleton width={60} /> : num_ap}
                                 </Typography>
-                                <Typography variant="caption" color="text.secondary">total APs</Typography>
+                                {globalLoading ? (
+                                    <Skeleton width={80} height={16} />
+                                ) : (
+                                    <Typography variant="caption" color="text.secondary">total APs</Typography>
+                                )}
                             </Box>
+                            {!globalLoading && (
                             <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5, alignItems: 'flex-end' }}>
                                 <Box sx={{
                                     px: 1, py: 0.2, borderRadius: 1,
@@ -292,12 +313,13 @@ export default function Dashboard() {
                                     </Box>
                                 )}
                             </Box>
+                            )}
                         </Box>
 
                         {/* MIDDLE SECTION 1 */}
                         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.5 }}>
                             <Typography variant="body2" sx={{ fontWeight: 'bold' }}>
-                                ↓ {wlan.tx_mbps} Mbps  ↑ {wlan.rx_mbps} Mbps
+                                {globalLoading ? <Skeleton width={150} height={16} /> : `↓ ${wlan.tx_mbps} Mbps  ↑ ${wlan.rx_mbps} Mbps`}
                             </Typography>
                         </Box>
 
@@ -363,6 +385,7 @@ export default function Dashboard() {
                         color="#f59e0b"
                         icon={<ShieldIcon />}
                         sx={{ height: '100%', minHeight: 'unset' }}
+                        loading={globalLoading}
                     />
                 </Box>
 
@@ -385,6 +408,7 @@ export default function Dashboard() {
                         urgent={criticalOffline > 0}
                         icon={<ReportProblemIcon />}
                         sx={{ height: '100%', minHeight: 'unset' }}
+                        loading={globalLoading}
                     />
                 </Box>
 
@@ -393,6 +417,11 @@ export default function Dashboard() {
                     <Card sx={{ p: 2, height: '100%', minHeight: 300 }}>
                         <Typography variant="h6" gutterBottom>Device Status Overview</Typography>
                         <ResponsiveContainer width="100%" height="85%">
+                            {globalLoading ? (
+                                <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%' }}>
+                                    <Skeleton variant="circular" width={160} height={160} />
+                                </Box>
+                            ) : (
                             <PieChart>
                                 <Pie
                                     data={pieData}
@@ -412,6 +441,7 @@ export default function Dashboard() {
                                     itemStyle={{ color: '#fff' }}
                                 />
                             </PieChart>
+                            )}
                         </ResponsiveContainer>
                     </Card>
                 </Box>
@@ -420,41 +450,53 @@ export default function Dashboard() {
                 <Box sx={{ gridColumn: '2', gridRow: '2' }}>
                     <Card sx={{ p: 2, height: '100%', minHeight: 300, overflowY: 'auto', ...scrollbarStyles }}>
                         <Typography variant="h6" gutterBottom>Network Segments Health</Typography>
-                        {segments.length === 0 && <Typography color="text.secondary">No segments configured.</Typography>}
-                        {segments.map(seg => {
-                            const totalDenom = seg.scan_total > 0 ? seg.scan_total : seg.registered_count;
-                            const percent = totalDenom > 0 ? (seg.online_count / totalDenom) * 100 : 0;
+                        
+                        {globalLoading ? (
+                            Array.from({ length: 3 }).map((_, i) => (
+                                <Box key={i} sx={{ mb: 2 }}>
+                                    <Skeleton width={120} height={16} sx={{ mb: 0.5 }} />
+                                    <Skeleton variant="rectangular" height={8} sx={{ borderRadius: 1 }} />
+                                </Box>
+                            ))
+                        ) : (
+                            <>
+                            {segments.length === 0 && <Typography color="text.secondary">No segments configured.</Typography>}
+                            {segments.map(seg => {
+                                const totalDenom = seg.scan_total > 0 ? seg.scan_total : seg.registered_count;
+                                const percent = totalDenom > 0 ? (seg.online_count / totalDenom) * 100 : 0;
 
-                            let subText;
-                            if (seg.scan_total > 0 && seg.last_scan_at) {
-                                subText = `last scan: ${new Date(seg.last_scan_at).toLocaleString('en-GB', { hour12: false }).replace(/\//g, '-').replace(',', '')}`;
-                            } else {
-                                subText = <React.Fragment>Run a <Link component={RouterLink} to="/segments" sx={{ color: 'primary.main', textDecoration: 'none', '&:hover': { textDecoration: 'underline' } }}>scan</Link></React.Fragment>;
-                            }
+                                let subText;
+                                if (seg.scan_total > 0 && seg.last_scan_at) {
+                                    subText = `last scan: ${new Date(seg.last_scan_at).toLocaleString('en-GB', { hour12: false }).replace(/\//g, '-').replace(',', '')}`;
+                                } else {
+                                    subText = <React.Fragment>Run a <Link component={RouterLink} to="/segments" sx={{ color: 'primary.main', textDecoration: 'none', '&:hover': { textDecoration: 'underline' } }}>scan</Link></React.Fragment>;
+                                }
 
-                            return (
-                                <Box key={seg.id} sx={{ mb: 2 }}>
-                                    <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.5 }}>
-                                        <Typography variant="body2" sx={{ display: 'flex', alignItems: 'center', gap: 1, fontSize: '0.8rem' }}>
-                                            <Box sx={{ width: 10, height: 10, borderRadius: '50%', bgcolor: seg.color || '#888' }} />
-                                            {seg.name}
-                                        </Typography>
-                                        <Typography variant="caption" color="text.secondary">
-                                            {totalDenom === 0 ? "No scan data" : `${seg.online_count} / ${totalDenom} UP`}
+                                return (
+                                    <Box key={seg.id} sx={{ mb: 2 }}>
+                                        <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.5 }}>
+                                            <Typography variant="body2" sx={{ display: 'flex', alignItems: 'center', gap: 1, fontSize: '0.8rem' }}>
+                                                <Box sx={{ width: 10, height: 10, borderRadius: '50%', bgcolor: seg.color || '#888' }} />
+                                                {seg.name}
+                                            </Typography>
+                                            <Typography variant="caption" color="text.secondary">
+                                                {totalDenom === 0 ? "No scan data" : `${seg.online_count} / ${totalDenom} UP`}
+                                            </Typography>
+                                        </Box>
+                                        <LinearProgress
+                                            variant="determinate"
+                                            value={percent}
+                                            color={percent === 100 ? "success" : percent > 50 ? "warning" : "error"}
+                                            sx={{ height: 6, borderRadius: 3, mb: 0.5, opacity: totalDenom === 0 ? 0.2 : 1 }}
+                                        />
+                                        <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.65rem' }}>
+                                            {subText}
                                         </Typography>
                                     </Box>
-                                    <LinearProgress
-                                        variant="determinate"
-                                        value={percent}
-                                        color={percent === 100 ? "success" : percent > 50 ? "warning" : "error"}
-                                        sx={{ height: 6, borderRadius: 3, mb: 0.5, opacity: totalDenom === 0 ? 0.2 : 1 }}
-                                    />
-                                    <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.65rem' }}>
-                                        {subText}
-                                    </Typography>
-                                </Box>
-                            );
-                        })}
+                                );
+                            })}
+                            </>
+                        )}
                     </Card>
                 </Box>
 
@@ -569,50 +611,62 @@ export default function Dashboard() {
                             px: '8px',
                             ...scrollbarStyles
                         }}>
-                            {criticalDevices.length === 0 &&
-                                <Typography color="text.secondary" sx={{ py: 2, px: 1 }}>
-                                    No critical devices configured.
-                                </Typography>
-                            }
-                            {criticalDevices.map(device => {
-                                const mergedEntry = onlineDevices.find(d => d.ip === device.ip_address);
-                                const isOnline = !!mergedEntry || device.status === 'up';
-                                const latency = mergedEntry?.latency_ms ?? device.latency_ms;
-                                const source = mergedEntry?.source;
+                            {globalLoading ? (
+                                Array.from({ length: 4 }).map((_, i) => (
+                                    <Box key={i} sx={{ display: 'flex', alignItems: 'center', mb: 1.5 }}>
+                                        <Skeleton variant="circular" width={10} height={10} sx={{ mr: 1.5 }} />
+                                        <Skeleton width={160} height={16} />
+                                        <Skeleton width={60} height={16} sx={{ ml: 'auto' }} />
+                                    </Box>
+                                ))
+                            ) : (
+                                <>
+                                {criticalDevices.length === 0 &&
+                                    <Typography color="text.secondary" sx={{ py: 2, px: 1 }}>
+                                        No critical devices configured.
+                                    </Typography>
+                                }
+                                {criticalDevices.map(device => {
+                                    const mergedEntry = onlineDevices.find(d => d.ip === device.ip_address);
+                                    const isOnline = !!mergedEntry || device.status === 'up';
+                                    const latency = mergedEntry?.latency_ms ?? device.latency_ms;
+                                    const source = mergedEntry?.source;
 
-                                return (
-                                    <Box key={device.id} sx={{
-                                        p: '8px 8px', borderRadius: 1,
-                                        display: 'flex',
-                                        alignItems: 'center',
-                                        justifyContent: 'space-between',
-                                        bgcolor: !isOnline ? 'rgba(239, 68, 68, 0.05)' : 'transparent',
-                                        borderBottom: '1px solid rgba(255,255,255,0.04)'
-                                    }}>
-                                        <Box sx={{ display: 'flex', flexDirection: 'column', minWidth: 0, flex: 1 }}>
-                                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                                                <Box sx={{
-                                                    width: 6, height: 6, borderRadius: '50%',
-                                                    bgcolor: isOnline ? 'success.main' : 'error.main',
-                                                    boxShadow: isOnline ? '0 0 6px #22c55e' : 'none',
-                                                    animation: isOnline ? 'pulse 2s infinite' : 'none',
-                                                    flexShrink: 0
-                                                }} />
-                                                <Typography variant="subtitle2" sx={{ fontSize: '0.82rem', fontWeight: 'bold', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                                    {device.hostname || device.ip_address}
+                                    return (
+                                        <Box key={device.id} sx={{
+                                            p: '8px 8px', borderRadius: 1,
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            justifyContent: 'space-between',
+                                            bgcolor: !isOnline ? 'rgba(239, 68, 68, 0.05)' : 'transparent',
+                                            borderBottom: '1px solid rgba(255,255,255,0.04)'
+                                        }}>
+                                            <Box sx={{ display: 'flex', flexDirection: 'column', minWidth: 0, flex: 1 }}>
+                                                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                                                    <Box sx={{
+                                                        width: 6, height: 6, borderRadius: '50%',
+                                                        bgcolor: isOnline ? 'success.main' : 'error.main',
+                                                        boxShadow: isOnline ? '0 0 6px #22c55e' : 'none',
+                                                        animation: isOnline ? 'pulse 2s infinite' : 'none',
+                                                        flexShrink: 0
+                                                    }} />
+                                                    <Typography variant="subtitle2" sx={{ fontSize: '0.82rem', fontWeight: 'bold', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                                        {device.hostname || device.ip_address}
+                                                    </Typography>
+                                                </Box>
+                                                <Typography variant="caption" sx={{ fontSize: '0.7rem', color: 'text.secondary', ml: 2 }}>
+                                                    {device.ip_address} · {latency != null ? `${latency}ms` : 'N/A'}
                                                 </Typography>
                                             </Box>
-                                            <Typography variant="caption" sx={{ fontSize: '0.7rem', color: 'text.secondary', ml: 2 }}>
-                                                {device.ip_address} · {latency != null ? `${latency}ms` : 'N/A'}
-                                            </Typography>
+                                            {source && (
+                                                <Chip label={source} size="small" variant="outlined"
+                                                    sx={{ height: 16, fontSize: '0.6rem', opacity: 0.6, flexShrink: 0 }} />
+                                            )}
                                         </Box>
-                                        {source && (
-                                            <Chip label={source} size="small" variant="outlined"
-                                                sx={{ height: 16, fontSize: '0.6rem', opacity: 0.6, flexShrink: 0 }} />
-                                        )}
-                                    </Box>
-                                );
-                            })}
+                                    );
+                                })}
+                                </>
+                            )}
                         </Box>
 
                         <Box sx={{

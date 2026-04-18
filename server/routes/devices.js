@@ -28,16 +28,35 @@ module.exports = async function (fastify, opts) {
 
     // ── Merged online devices (must be before /:id routes) ──
     fastify.get('/online', async (request, reply) => {
-        const { connection } = request.query || {};
+        const { connection, is_wired, page = 1, limit = 20 } = request.query || {};
         let devices = await mergeOnlineDevices();
 
-        if (connection === 'wired') {
+        const filterVal = connection || is_wired;
+        if (filterVal === 'wired' || filterVal === 'true' || filterVal === '1') {
             devices = devices.filter(d => d.is_wired === true);
-        } else if (connection === 'wireless') {
+        } else if (filterVal === 'wireless' || filterVal === 'false' || filterVal === '0') {
             devices = devices.filter(d => d.is_wired === false);
         }
 
-        reply.send({ devices });
+        const total = devices.length;
+        
+        // Paginate slice
+        const pageNum = parseInt(page, 10);
+        const limitNum = parseInt(limit, 10);
+        const startIndex = (pageNum - 1) * limitNum;
+        const endIndex = pageNum * limitNum;
+        
+        const paginatedDevices = devices.slice(startIndex, endIndex);
+
+        reply.send({ 
+            devices: paginatedDevices,
+            pagination: {
+                page: pageNum,
+                limit: limitNum,
+                total,
+                hasMore: endIndex < total
+            }
+        });
     });
 
     fastify.get('/online/count', async (request, reply) => {

@@ -1,7 +1,9 @@
 import React from 'react';
 import { Box, Card, Typography } from '@mui/material';
 
-export default function StatCard({ title, value, color, icon, urgent, subtitle, onClick, hoverColor, extraAction }) {
+import { Skeleton } from '@mui/material';
+
+export default function StatCard({ title, value, color, icon, urgent, subtitle, onClick, hoverColor, extraAction, loading }) {
   return (
     <Card
       onClick={onClick}
@@ -27,10 +29,12 @@ export default function StatCard({ title, value, color, icon, urgent, subtitle, 
           {title}
         </Typography>
         <Typography variant="h4" component="div" sx={{ color: urgent ? 'error.main' : 'text.primary', fontWeight: 'bold' }}>
-          {value}
+          {loading ? <Skeleton width={60} /> : value}
         </Typography>
-        {subtitle && (
-          <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>{subtitle}</Typography>
+        {(subtitle || loading) && (
+          <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+            {loading ? <Skeleton width={100} height={16} /> : subtitle}
+          </Typography>
         )}
         {extraAction && (
           <Box
