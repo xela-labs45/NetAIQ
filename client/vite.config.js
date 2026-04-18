@@ -26,6 +26,19 @@ export default defineConfig({
     },
     build: {
         outDir: '../server/public',
-        emptyOutDir: true
+        emptyOutDir: true,
+        chunkSizeWarningLimit: 600,
+        rollupOptions: {
+            output: {
+                manualChunks: {
+                    'vendor-react':  ['react', 'react-dom', 'react-router-dom'],
+                    'vendor-mui':    ['@mui/material', '@mui/icons-material', '@emotion/react', '@emotion/styled'],
+                    'vendor-charts': ['recharts'],
+                    'vendor-query':  ['@tanstack/react-query'],
+                    'vendor-socket': ['socket.io-client'],
+                    'vendor-lottie': ['lottie-react']
+                }
+            }
+        }
     }
 })
