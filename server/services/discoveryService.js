@@ -108,57 +108,86 @@ function ipToCidr(ip, netmask) {
  * Auto-detect the server's L2 segment by reading OS network interfaces
  * and matching against configured segments in the database.
  * 
- * Priority: skip loopback, skip Docker bridge (172.x), skip link-local (169.254.x).
+ * Priority: skip loopback and virtual/container interfaces by name.
  * Prefer interfaces whose IP falls within a configured segment.
  */
 function getServerL2Segment() {
     const interfaces = os.networkInterfaces();
     const segments = db.prepare('SELECT * FROM segments').all();
+    const isDev = process.env.NODE_ENV !== 'production';
+
+    const candidates = [];
 
     for (const [name, addrs] of Object.entries(interfaces)) {
-        // Skip loopback
-        if (name === 'lo') continue;
+        // Skip loopback early
+        if (name === 'lo') {
+            if (isDev) console.log(`[Discovery] Interface ${name}: skipped (loopback)`);
+            continue;
+        }
+
+        // Skip virtual/container interfaces by name
+        if (/^(docker|br-|veth|virbr|lxc|lxd|cni|flannel|calico)/.test(name)) {
+            if (isDev) console.log(`[Discovery] Interface ${name}: skipped (virtual/container)`);
+            continue;
+        }
 
         for (const addr of (addrs || [])) {
             // IPv4 only
             if (addr.family !== 'IPv4') continue;
-            if (addr.internal) continue;
-            // Skip Docker bridge ranges
-            if (addr.address.startsWith('172.')) continue;
-            // Skip link-local
-            if (addr.address.startsWith('169.254.')) continue;
+
+            if (addr.internal) {
+                if (isDev) console.log(`[Discovery] Interface ${name} IP ${addr.address}: skipped (internal)`);
+                continue;
+            }
+
+            // Save candidate for fallback pass
+            candidates.push({ name, addr });
 
             // Check if this IP falls within a configured segment
+            let matchedSegment = null;
             for (const segment of segments) {
                 try {
                     const block = new Netmask(segment.cidr);
                     if (block.contains(addr.address)) {
-                        return {
-                            ip: addr.address,
-                            cidr: segment.cidr,
-                            segment_id: segment.id,
-                            segment: segment.name,
-                            interface: name,
-                            netmask: addr.netmask
-                        };
+                        matchedSegment = segment;
+                        break;
                     }
                 } catch { continue; }
             }
 
-            // Not in any configured segment but still a valid LAN IP —
-            // return it as best-guess with auto-detected CIDR
-            const cidr = ipToCidr(addr.address, addr.netmask);
-            return {
-                ip: addr.address,
-                cidr,
-                segment_id: null,
-                segment: 'Auto-detected',
-                interface: name,
-                netmask: addr.netmask
-            };
+            if (matchedSegment) {
+                if (isDev) console.log(`[Discovery] Interface ${name} IP ${addr.address}: matched segment ${matchedSegment.name} (${matchedSegment.cidr})`);
+                return {
+                    ip: addr.address,
+                    cidr: matchedSegment.cidr,
+                    segment_id: matchedSegment.id,
+                    segment: matchedSegment.name,
+                    interface: name,
+                    netmask: addr.netmask
+                };
+            } else {
+                if (isDev) console.log(`[Discovery] Interface ${name} IP ${addr.address}: not in any configured segment`);
+            }
         }
     }
-    return null;  // could not detect
+
+    // Fallback: second pass to use the first valid candidate
+    if (candidates.length > 0) {
+        const { name, addr } = candidates[0];
+        const cidr = ipToCidr(addr.address, addr.netmask);
+        if (isDev) console.log(`[Discovery] Interface ${name} IP ${addr.address}: fallback to computed CIDR ${cidr}`);
+        return {
+            ip: addr.address,
+            cidr,
+            segment_id: null,
+            segment: 'Auto-detected',
+            interface: name,
+            netmask: addr.netmask
+        };
+    }
+
+    if (isDev) console.log(`[Discovery] No valid interface found for L2 segment detection.`);
+    return null;
 }
 
 // ─── Capability Detection ───────────────────────────────────────────
