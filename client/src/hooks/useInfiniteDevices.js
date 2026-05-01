@@ -82,7 +82,8 @@ export function useInfiniteDevices(mainTab, filters, depends = true) {
     setPage(1);
     setHasMore(true);
     fetchDevices(false);
-  }, [mainTab, ...Object.values(filters), depends]); // Only trigger when filters actually change
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mainTab, JSON.stringify(filters), depends]);
 
   // Refetch action triggers a complete reload
   const refetch = useCallback(() => {

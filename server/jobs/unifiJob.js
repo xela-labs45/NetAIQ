@@ -55,14 +55,15 @@ module.exports = function (fastify) {
                 // AP went offline
                 if (wlan.num_disconnected > previousDisconnected) {
                     const newOffline = wlan.num_disconnected - previousDisconnected;
-                    await alertService.createAlert(
-                        null,
-                        'ap_disconnected',
-                        `${newOffline} access point(s) disconnected. ${wlan.num_disconnected} of ${wlan.num_ap} APs offline.`,
-                        'critical'
-                    );
+                    await alertService.createAlert({
+                        device_id: null,
+                        alert_type: 'ap_disconnected',
+                        message: `${newOffline} access point(s) disconnected. ${wlan.num_disconnected} of ${wlan.num_ap} APs offline.`,
+                        severity: 'critical',
+                        fastify
+                    });
                     await alertService.sendEmailAlert({
-                        type: 'ap_disconnected',
+                        alert_type: 'ap_disconnected',
                         message: `CRITICAL: ${wlan.num_disconnected} AP(s) offline`,
                         severity: 'critical'
                     });
@@ -75,12 +76,13 @@ module.exports = function (fastify) {
 
                 // AP came back online
                 if (wlan.num_disconnected < previousDisconnected) {
-                    await alertService.createAlert(
-                        null,
-                        'ap_reconnected',
-                        `Access point(s) reconnected. All ${wlan.num_ap} APs now online.`,
-                        'info'
-                    );
+                    await alertService.createAlert({
+                        device_id: null,
+                        alert_type: 'ap_reconnected',
+                        message: `Access point(s) reconnected. All ${wlan.num_ap} APs now online.`,
+                        severity: 'info',
+                        fastify
+                    });
                     fastify.io.emit('alert:new', {
                         type: 'ap_reconnected',
                         severity: 'info',

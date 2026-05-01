@@ -76,7 +76,19 @@ function formatInUserTimezone(date) {
     }
 }
 
+/**
+ * Converts a JS Date to SQLite CURRENT_TIMESTAMP format ('YYYY-MM-DD HH:MM:SS' UTC).
+ * Use this for all cutoff/comparison values bound to SQLite queries — toISOString()
+ * produces 'YYYY-MM-DDTHH:MM:SS.mssZ' which compares incorrectly against stored
+ * 'YYYY-MM-DD HH:MM:SS' values because SQLite does lexicographic string comparison
+ * and 'T' (0x54) sorts after ' ' (0x20), causing same-day rows to be mis-compared.
+ */
+function toSqliteTimestamp(date) {
+    return date.toISOString().replace('T', ' ').substring(0, 19);
+}
+
 module.exports = {
     formatInUserTimezone,
-    normalizeDate
+    normalizeDate,
+    toSqliteTimestamp
 };

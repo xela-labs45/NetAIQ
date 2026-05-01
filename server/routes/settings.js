@@ -98,7 +98,11 @@ module.exports = async function (fastify, opts) {
 
 
     fastify.put('/general', async (request, reply) => {
-        saveSettings(request.body);
+        const GENERAL_ALLOWED = new Set(['timezone']);
+        const filtered = Object.fromEntries(
+            Object.entries(request.body).filter(([k]) => GENERAL_ALLOWED.has(k))
+        );
+        saveSettings(filtered);
         reply.send({ success: true });
     });
 

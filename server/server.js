@@ -49,6 +49,14 @@ fastify.decorate('authenticate', async function (request, reply) {
   }
 });
 
+// Block all non-password-change API routes for accounts that still have the
+// default password set.  The mustChange flag is embedded in the JWT at login.
+fastify.addHook('preHandler', async (request, reply) => {
+  if (!request.user?.mustChange) return;
+  if (request.url === '/api/v1/settings/password') return;
+  reply.code(403).send({ error: true, message: 'Password change required before accessing other resources.' });
+});
+
 // Serve frontend in production
 if (process.env.NODE_ENV === 'production') {
   fastify.register(fastifyStatic, {

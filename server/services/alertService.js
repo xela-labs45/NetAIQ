@@ -67,7 +67,9 @@ async function createAlert({ device_id, alert_type, message, severity, fastify }
   `).get(device_id, alert_type);
 
     if (recentAlert) {
-        const alertTime = new Date(recentAlert.created_at).getTime();
+        // Append 'Z' so V8 parses the SQLite 'YYYY-MM-DD HH:MM:SS' format as UTC
+        // rather than local time, which would shift cooldown windows on non-UTC servers.
+        const alertTime = new Date(recentAlert.created_at.replace(' ', 'T') + 'Z').getTime();
         if (Date.now() - alertTime < cooldownMs) {
             console.log(`Alert deduplicated (cooldown ${Math.round(cooldownMs / 60000)}min): ${alert_type} for device ${device_id}`);
             return;

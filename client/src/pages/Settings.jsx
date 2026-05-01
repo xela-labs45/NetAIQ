@@ -311,19 +311,21 @@ export default function Settings() {
         queryKey: ['pollingStatus'],
         queryFn: () => axios.get('/api/v1/settings/polling-status').then(res => res.data),
         refetchInterval: 5000,
-        enabled: tabIndex === 4
+        enabled: tabIndex === 5
     });
 
-    const fetchAiStatus = useQuery({
+    const { data: aiStatusData } = useQuery({
         queryKey: ['aiStatus'],
         queryFn: () => axios.get('/api/v1/ai/status').then(res => res.data),
-        onSuccess: (data) => {
-            if (data.status === 'ok') setAiStatus('connected');
-            else if (data.status === 'error') setAiStatus('error');
-        },
         retry: false,
         refetchOnWindowFocus: false
     });
+
+    useEffect(() => {
+        if (!aiStatusData) return;
+        if (aiStatusData.status === 'ok') setAiStatus('connected');
+        else if (aiStatusData.status === 'error') setAiStatus('error');
+    }, [aiStatusData]);
 
     const handlePasswordSubmit = (e) => {
         e.preventDefault();
@@ -646,7 +648,7 @@ export default function Settings() {
                                         <Box sx={{ mt: 1.5, ml: 5.8, display: 'flex', alignItems: 'center', gap: 1, p: 1, borderRadius: 1, bgcolor: 'rgba(255,152,0,0.1)', border: '1px solid rgba(255,152,0,0.3)' }}>
                                             <ErrorIcon fontSize="small" sx={{ color: 'warning.main' }} />
                                             <Typography variant="body2" sx={{ color: 'warning.main' }}>
-                                                AI API key not configured. <span style={{ cursor: 'pointer', textDecoration: 'underline' }} onClick={() => setTabIndex(3)}>Go to AI Settings</span>.
+                                                AI API key not configured. <span style={{ cursor: 'pointer', textDecoration: 'underline' }} onClick={() => setTabIndex(4)}>Go to AI Settings</span>.
                                             </Typography>
                                         </Box>
                                     );

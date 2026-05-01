@@ -3,6 +3,7 @@ const { z } = require('zod');
 const { pingDevice } = require('../services/pingService');
 const { mergeOnlineDevices, getOnlineCount } = require('../services/mergeService');
 const { lookupMac } = require('../services/macOuiService');
+const { toSqliteTimestamp } = require('../utils/dateFormatter');
 
 function normaliseMac(mac) {
     if (!mac) return null;
@@ -223,6 +224,8 @@ module.exports = async function (fastify, opts) {
 
     fastify.delete('/:id', async (request, reply) => {
         const { id } = request.params;
+        const escalatingPollManager = require('../services/EscalatingPollManager');
+        escalatingPollManager.stopEscalation(parseInt(id, 10), 'device deleted');
         db.prepare('DELETE FROM devices WHERE id = ?').run(id);
         reply.send({ success: true });
     });
@@ -243,7 +246,7 @@ module.exports = async function (fastify, opts) {
         const { id } = request.params;
         const { hours = 24 } = request.query;
 
-        const timeLimit = new Date(Date.now() - (hours * 60 * 60 * 1000)).toISOString();
+        const timeLimit = toSqliteTimestamp(new Date(Date.now() - (hours * 60 * 60 * 1000)));
 
         // Grab every Nth result to avoid sending too much data if doing 24h
         // Simple approach: grab up to latest 500 records
@@ -261,7 +264,7 @@ module.exports = async function (fastify, opts) {
         const { id } = request.params;
 
         const getUptime = (hours) => {
-            const timeLimit = new Date(Date.now() - (hours * 60 * 60 * 1000)).toISOString();
+            const timeLimit = toSqliteTimestamp(new Date(Date.now() - (hours * 60 * 60 * 1000)));
             const stats = db.prepare(`
         SELECT count(*) as total, 
                SUM(CASE WHEN status = 'up' THEN 1 ELSE 0 END) as up_count

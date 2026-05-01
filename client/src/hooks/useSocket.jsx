@@ -42,20 +42,17 @@ export function SocketProvider({ children }) {
                     if (!oldData) return oldData;
                     return {
                         ...oldData,
-                        data: {
-                            ...oldData.data,
-                            devices: oldData.data.devices.map(d => {
-                                if (d.id === data.device_id) {
-                                    return {
-                                        ...d,
-                                        status: data.status,
-                                        latency_ms: data.latency_ms,
-                                        last_seen: data.timestamp
-                                    };
-                                }
-                                return d;
-                            })
-                        }
+                        devices: oldData.devices.map(d => {
+                            if (d.id === data.device_id) {
+                                return {
+                                    ...d,
+                                    status: data.status,
+                                    latency_ms: data.latency_ms,
+                                    last_seen: data.timestamp
+                                };
+                            }
+                            return d;
+                        })
                     };
                 });
             });

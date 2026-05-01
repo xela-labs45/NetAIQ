@@ -11,6 +11,7 @@
 const db = require('../db/database');
 const unifiService = require('./unifiService');
 const { lookupMac } = require('./macOuiService');
+const { toSqliteTimestamp } = require('../utils/dateFormatter');
 
 /**
  * Merge all online device sources into a deduplicated list keyed by IP.
@@ -117,7 +118,7 @@ async function mergeOnlineDevices() {
 
     // ── Source C: Ping history (recent, < 5 min) ────────────────
     try {
-        const fiveMinAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+        const fiveMinAgo = toSqliteTimestamp(new Date(Date.now() - 5 * 60 * 1000));
 
         const recentPings = db.prepare(`
             SELECT d.id as device_id, d.hostname, d.ip_address, d.mac_address,

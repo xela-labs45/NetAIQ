@@ -107,7 +107,7 @@ async function makeRequest(method, endpoint, data = null, retry = true) {
     }
 
     try {
-        const config = { method, url, headers, httpsAgent };
+        const config = { method, url, headers, httpsAgent, timeout: 10000 };
         if (data) config.data = data;
 
         const response = await axios(config);

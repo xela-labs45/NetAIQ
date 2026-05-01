@@ -9,9 +9,9 @@ const { lookupMac } = require('./macOuiService');
 async function backfillVendors(fastify) {
     try {
         const devices = db.prepare(`
-            SELECT id, mac_address 
-            FROM devices 
-            WHERE (vendor IS NULL OR device_type IS NULL OR os_guess IS NULL)
+            SELECT id, mac_address
+            FROM devices
+            WHERE (vendor IS NULL OR device_type IS NULL)
             AND mac_address IS NOT NULL
         `).all();
 
@@ -19,10 +19,9 @@ async function backfillVendors(fastify) {
 
         let count = 0;
         const updateStmt = db.prepare(`
-            UPDATE devices 
+            UPDATE devices
             SET vendor = COALESCE(vendor, ?),
-                device_type = COALESCE(device_type, ?),
-                os_guess = COALESCE(os_guess, ?)
+                device_type = COALESCE(device_type, ?)
             WHERE id = ?
         `);
 
@@ -33,7 +32,6 @@ async function backfillVendors(fastify) {
                     updateStmt.run(
                         oui.manufacturer || null,
                         oui.device_type || null,
-                        oui.os_guess || null,
                         device.id
                     );
                     count++;

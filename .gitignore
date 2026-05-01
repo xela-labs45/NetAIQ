@@ -22,3 +22,7 @@ npm-debug.log*
 # IDE
 .vscode/
 .idea/
+.kilo/
+
+# Bug Files
+BUG_AUDIT.md

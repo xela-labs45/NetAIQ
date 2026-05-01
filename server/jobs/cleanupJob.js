@@ -1,6 +1,7 @@
 const cron = require('node-cron');
 const db = require('../db/database');
 const settingsService = require('../services/settingsService');
+const { toSqliteTimestamp } = require('../utils/dateFormatter');
 
 function getSetting(key, defaultValue) {
     const val = settingsService.get(key);
@@ -20,7 +21,7 @@ function startPingHistoryCleanup() {
     // Daily at 2:00 AM
     cron.schedule('0 2 * * *', () => {
         const retentionDays = getSetting('ping_history_retention_days', 90);
-        const cutoffDate = new Date(Date.now() - retentionDays * 86400000).toISOString();
+        const cutoffDate = toSqliteTimestamp(new Date(Date.now() - retentionDays * 86400000));
 
         try {
             const deleteOld = db.transaction(() => {
@@ -57,7 +58,7 @@ function startAlertHistoryCleanup() {
     // Every Sunday at 3:00 AM
     cron.schedule('0 3 * * 0', () => {
         const retentionDays = getSetting('alert_retention_days', 180);
-        const cutoffDate = new Date(Date.now() - retentionDays * 86400000).toISOString();
+        const cutoffDate = toSqliteTimestamp(new Date(Date.now() - retentionDays * 86400000));
 
         try {
             const deleteOld = db.transaction(() => {

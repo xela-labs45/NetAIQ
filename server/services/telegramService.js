@@ -1,6 +1,14 @@
 const db = require('../db/database');
 const { formatInUserTimezone, normalizeDate } = require('../utils/dateFormatter');
 
+function escapeHtml(str) {
+    if (!str) return str;
+    return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
+}
+
 // Lazy-load aiService to avoid circular dependency
 let _aiService = null;
 function getAiService() {
@@ -65,7 +73,8 @@ async function sendMessage(message) {
                 chat_id: telegram_chat_id,
                 text: message,
                 parse_mode: 'HTML'
-            })
+            }),
+            signal: AbortSignal.timeout(10000)
         });
 
         const data = await response.json();
@@ -138,10 +147,10 @@ async function sendCriticalDeviceOffline(device, segmentName) {
     const baseMessage = [
         `🔴 <b>Critical Device Offline</b>`,
         ``,
-        `<b>Device:</b> ${device.hostname || device.ip_address}`,
-        `<b>IP:</b> ${device.ip_address}`,
-        device.mac_address ? `<b>MAC:</b> ${device.mac_address}` : null,
-        segmentName ? `<b>Segment:</b> ${segmentName}` : null,
+        `<b>Device:</b> ${escapeHtml(device.hostname || device.ip_address)}`,
+        `<b>IP:</b> ${escapeHtml(device.ip_address)}`,
+        device.mac_address ? `<b>MAC:</b> ${escapeHtml(device.mac_address)}` : null,
+        segmentName ? `<b>Segment:</b> ${escapeHtml(segmentName)}` : null,
         device.last_seen ? `<b>Last Seen:</b> ${device.last_seen}` : null,
         `<b>Time:</b> ${formatTimestamp()}`,
         ``,
@@ -174,9 +183,9 @@ async function sendCriticalDeviceOnline(device, segmentName, downtimeMs) {
     const baseMessage = [
         `🟢 <b>Critical Device Restored</b>`,
         ``,
-        `<b>Device:</b> ${device.hostname || device.ip_address}`,
-        `<b>IP:</b> ${device.ip_address}`,
-        segmentName ? `<b>Segment:</b> ${segmentName}` : null,
+        `<b>Device:</b> ${escapeHtml(device.hostname || device.ip_address)}`,
+        `<b>IP:</b> ${escapeHtml(device.ip_address)}`,
+        segmentName ? `<b>Segment:</b> ${escapeHtml(segmentName)}` : null,
         `<b>Downtime:</b> ${downtimeStr}`,
         `<b>Time:</b> ${formatTimestamp()}`,
         ``,
@@ -207,8 +216,8 @@ async function sendApOffline(ap) {
     const baseMessage = [
         `🔴 <b>Access Point Offline</b>`,
         ``,
-        `<b>AP Name:</b> ${ap.name || 'Unknown AP'}`,
-        ap.mac ? `<b>MAC:</b> ${ap.mac}` : null,
+        `<b>AP Name:</b> ${escapeHtml(ap.name) || 'Unknown AP'}`,
+        ap.mac ? `<b>MAC:</b> ${escapeHtml(ap.mac)}` : null,
         lastSeenFormatted ? `<b>Last Seen:</b> ${lastSeenFormatted}` : null,
         `<b>Time:</b> ${formatTimestamp()}`,
         ``,
@@ -237,8 +246,8 @@ async function sendApOnline(ap, downtimeMs) {
     const baseMessage = [
         `🟢 <b>Access Point Restored</b>`,
         ``,
-        `<b>AP Name:</b> ${ap.name || 'Unknown AP'}`,
-        ap.mac ? `<b>MAC:</b> ${ap.mac}` : null,
+        `<b>AP Name:</b> ${escapeHtml(ap.name) || 'Unknown AP'}`,
+        ap.mac ? `<b>MAC:</b> ${escapeHtml(ap.mac)}` : null,
         `<b>Downtime:</b> ${downtimeStr}`,
         `<b>Time:</b> ${formatTimestamp()}`,
         ``,
@@ -264,8 +273,8 @@ async function sendSegmentOffline(segment, expectedDevices, hostsFound) {
     const baseMessage = [
         `🔴 <b>Network Segment Unreachable</b>`,
         ``,
-        `<b>Segment:</b> ${segment.name}`,
-        `<b>Subnet:</b> ${segment.cidr}`,
+        `<b>Segment:</b> ${escapeHtml(segment.name)}`,
+        `<b>Subnet:</b> ${escapeHtml(segment.cidr)}`,
         `<b>Devices Expected:</b> ${expectedDevices}`,
         `<b>Devices Found:</b> ${hostsFound || 0}`,
         `<b>Time:</b> ${formatTimestamp()}`,
