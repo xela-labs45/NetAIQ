@@ -185,8 +185,8 @@ export default function LiveDevicesModal({ open, onClose, defaultTab = 'all' }) 
     const bulkMutation = useMutation({
         mutationFn: (payload) => axios.post('/api/v1/devices/bulk', payload),
         onSuccess: (res) => {
-            queryClient.invalidateQueries(['devices']);
-            queryClient.invalidateQueries(['liveDevices']);
+            queryClient.invalidateQueries({ queryKey: ['devices'] });
+            queryClient.invalidateQueries({ queryKey: ['liveDevices'] });
             alert(`Success! Registered ${res.data.registered} devices. Skipped ${res.data.skipped}.`);
         }
     });
@@ -194,8 +194,8 @@ export default function LiveDevicesModal({ open, onClose, defaultTab = 'all' }) 
     const singleAddMutation = useMutation({
         mutationFn: (payload) => axios.post('/api/v1/devices', payload),
         onSuccess: () => {
-            queryClient.invalidateQueries(['devices']);
-            queryClient.invalidateQueries(['liveDevices']);
+            queryClient.invalidateQueries({ queryKey: ['devices'] });
+            queryClient.invalidateQueries({ queryKey: ['liveDevices'] });
             setAddDialogOpen(false);
         }
     });
@@ -574,9 +574,9 @@ export default function LiveDevicesModal({ open, onClose, defaultTab = 'all' }) 
                                                             color="inherit"
                                                             sx={{ fontSize: '0.7rem', py: 0, textTransform: 'none' }}
                                                             onClick={() => identifySingleMutation.mutate(d.mac_address)}
-                                                            disabled={identifySingleMutation.isLoading && identifySingleMutation.variables === d.mac_address}
+                                                            disabled={identifySingleMutation.isPending && identifySingleMutation.variables === d.mac_address}
                                                         >
-                                                            {identifySingleMutation.isLoading && identifySingleMutation.variables === d.mac_address ? 'Identifying...' : 'Identify'}
+                                                            {identifySingleMutation.isPending && identifySingleMutation.variables === d.mac_address ? 'Identifying...' : 'Identify'}
                                                         </Button>
                                                     )}
                                                 </TableCell>
@@ -633,8 +633,8 @@ export default function LiveDevicesModal({ open, onClose, defaultTab = 'all' }) 
                             <Typography variant="body2" color="text.secondary">
                                 Showing {onlineDevices.length} devices · <span style={{ color: unregisteredCount > 0 ? '#f59e0b' : 'inherit' }}>{unregisteredCount} not yet registered</span>
                             </Typography>
-                            <Button variant="contained" color="warning" disabled={unregisteredCount === 0 || bulkMutation.isLoading} onClick={handleBulkRegister}>
-                                {bulkMutation.isLoading ? 'Registering...' : 'Register All Unregistered'}
+                            <Button variant="contained" color="warning" disabled={unregisteredCount === 0 || bulkMutation.isPending} onClick={handleBulkRegister}>
+                                {bulkMutation.isPending ? 'Registering...' : 'Register Loaded Unregistered'}
                             </Button>
                         </>
                     ) : (
@@ -646,10 +646,10 @@ export default function LiveDevicesModal({ open, onClose, defaultTab = 'all' }) 
                                 variant="outlined"
                                 color="secondary"
                                 onClick={() => identifyAllMutation.mutate()}
-                                disabled={discoveredUnidentifiedCount === 0 || identifyAllMutation.isLoading || aiProgress}
+                                disabled={discoveredUnidentifiedCount === 0 || identifyAllMutation.isPending || aiProgress}
                                 startIcon={<AutoAwesomeIcon />}
                             >
-                                {identifyAllMutation.isLoading || aiProgress ? 'Batch Identify In Progress...' : `Identify All Unidentified (${discoveredUnidentifiedCount})`}
+                                {identifyAllMutation.isPending || aiProgress ? 'Batch Identify In Progress...' : `Identify All Unidentified (${discoveredUnidentifiedCount})`}
                             </Button>
                         </>
                     )}

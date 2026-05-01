@@ -19,7 +19,7 @@ import {
 } from '@mui/icons-material';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import axios from 'axios';
-import { io } from 'socket.io-client';
+import { useSocket } from '../hooks/useSocket';
 import { DEVICE_TYPES, getDeviceTypeIcon } from '../constants/deviceTypes';
 import { format } from 'date-fns';
 import { useNavigate } from 'react-router-dom';
@@ -34,26 +34,33 @@ export default function Insights() {
     const [lastCallFailed, setLastCallFailed] = useState(false);
     const [toast, setToast] = useState({ open: false, message: '', severity: 'info' });
 
+    const socket = useSocket();
+
     const showToast = (message, severity = 'info') => {
         setToast({ open: true, message, severity });
     };
 
-    // Socket.IO for real-time updates
+    // Socket.IO for real-time updates — use shared provider socket, not a new connection
     useEffect(() => {
-        const socket = io();
-        socket.on('ai:analysis_complete', ({ type }) => {
-            if (type === 'anomaly') queryClient.invalidateQueries(['anomalies']);
-            if (type === 'alert_triage') queryClient.invalidateQueries(['alerts']);
+        if (!socket) return;
+        const handleAnalysisComplete = ({ type }) => {
+            if (type === 'anomaly') queryClient.invalidateQueries({ queryKey: ['anomalies'] });
+            if (type === 'alert_triage') queryClient.invalidateQueries({ queryKey: ['alerts'] });
             setLastCallFailed(false);
             setRunning(false);
-        });
-        socket.on('ai:analysis_error', ({ message }) => {
+        };
+        const handleAnalysisError = ({ message }) => {
             setLastCallFailed(true);
             setRunning(false);
             showToast(`Analysis failed: ${message}`, 'error');
-        });
-        return () => socket.disconnect();
-    }, [queryClient]);
+        };
+        socket.on('ai:analysis_complete', handleAnalysisComplete);
+        socket.on('ai:analysis_error', handleAnalysisError);
+        return () => {
+            socket.off('ai:analysis_complete', handleAnalysisComplete);
+            socket.off('ai:analysis_error', handleAnalysisError);
+        };
+    }, [socket, queryClient]);
 
     // Countdown timer for rate limits
     useEffect(() => {

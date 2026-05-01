@@ -3,7 +3,7 @@ const { z } = require('zod');
 const { pingDevice } = require('../services/pingService');
 const { mergeOnlineDevices, getOnlineCount } = require('../services/mergeService');
 const { lookupMac } = require('../services/macOuiService');
-const { toSqliteTimestamp } = require('../utils/dateFormatter');
+const { toSqliteTimestamp, safeError } = require('../utils/dateFormatter');
 
 function normaliseMac(mac) {
     if (!mac) return null;
@@ -185,7 +185,7 @@ module.exports = async function (fastify, opts) {
             if (err.code === 'SQLITE_CONSTRAINT_UNIQUE') {
                 reply.code(400).send({ error: true, message: 'IP address already exists.' });
             } else {
-                reply.code(500).send({ error: true, message: err.message });
+                reply.code(500).send({ error: true, message: safeError(err) });
             }
         }
     });
@@ -217,7 +217,7 @@ module.exports = async function (fastify, opts) {
             if (err.code === 'SQLITE_CONSTRAINT_UNIQUE') {
                 reply.code(400).send({ error: true, message: 'IP address already exists.' });
             } else {
-                reply.code(500).send({ error: true, message: err.message });
+                reply.code(500).send({ error: true, message: safeError(err) });
             }
         }
     });

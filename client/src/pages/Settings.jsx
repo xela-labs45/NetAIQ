@@ -292,10 +292,9 @@ export default function Settings() {
     });
 
     const { data: modelsData, isLoading: isLoadingModels, refetch: refetchModels } = useQuery({
-        queryKey: ['aiModels', ai.ai_provider, ai.ai_anthropic_key, ai.ai_openrouter_key],
+        queryKey: ['aiModels', ai.ai_provider],
         queryFn: () => {
             const key = ai.ai_provider === 'anthropic' ? ai.ai_anthropic_key : ai.ai_openrouter_key;
-            // Only fetch if we have a key (or it's 'sk-***' which means use the stored one)
             return axios.get('/api/v1/ai/models', {
                 params: {
                     provider: ai.ai_provider,

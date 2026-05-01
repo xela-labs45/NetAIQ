@@ -150,9 +150,7 @@ export default function Dashboard() {
     const num_pending = wlan.num_pending;
     const num_user = wlan.num_user;
 
-    const unifi_url = unifiSettings?.unifi_url
-        || unifiSettings?.data?.unifi_url
-        || '#';
+    const unifi_url = unifiSettings?.settings?.unifi_url || '#';
 
     const handleApCardClick = (e, filter = 'all') => {
         if (e) e.stopPropagation();

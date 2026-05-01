@@ -87,8 +87,18 @@ function toSqliteTimestamp(date) {
     return date.toISOString().replace('T', ' ').substring(0, 19);
 }
 
+/**
+ * Returns err.message in development; a generic string in production.
+ * Prevents internal DB schema details, file paths, and service URLs from leaking in API responses.
+ */
+function safeError(err) {
+    if (process.env.NODE_ENV !== 'production') return err.message;
+    return 'Internal server error';
+}
+
 module.exports = {
     formatInUserTimezone,
     normalizeDate,
-    toSqliteTimestamp
+    toSqliteTimestamp,
+    safeError
 };

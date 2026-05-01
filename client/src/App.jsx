@@ -8,12 +8,13 @@ import Bandwidth from './pages/Bandwidth';
 import Alerts from './pages/Alerts';
 import Settings from './pages/Settings';
 import Insights from './pages/Insights';
+import AppLoader from './components/AppLoader';
 import { useAuth } from './hooks/useAuth';
 
 function PrivateRoute({ children }) {
     const { user, loading } = useAuth();
 
-    if (loading) return null;
+    if (loading) return <AppLoader appLoading />;
 
     if (!user) {
         return <Navigate to="/login" />;

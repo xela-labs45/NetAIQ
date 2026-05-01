@@ -190,6 +190,10 @@ module.exports = async function (fastify, opts) {
     fastify.put('/password', async (request, reply) => {
         const { current_password, new_password } = request.body;
 
+        if (!new_password || new_password.length < 12) {
+            return reply.code(400).send({ error: true, message: 'New password must be at least 12 characters.' });
+        }
+
         const user = db.prepare('SELECT * FROM users WHERE id = ?').get(request.user.id);
         const match = await bcrypt.compare(current_password, user.password_hash);
 

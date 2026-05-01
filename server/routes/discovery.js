@@ -1,4 +1,5 @@
 const db = require('../db/database');
+const { safeError } = require('../utils/dateFormatter');
 const {
     checkDiscoveryCapability,
     arpScanL2Segment,
@@ -42,7 +43,11 @@ module.exports = async function (fastify, opts) {
              (SELECT 1 FROM devices d WHERE d.mac_address = dd.mac_address LIMIT 1) as is_registered
       FROM discovered_devices dd
       LEFT JOIN ai_device_identifications aid
-        ON aid.mac_address = dd.mac_address
+        ON aid.id = (
+          SELECT id FROM ai_device_identifications
+          WHERE mac_address = dd.mac_address
+          ORDER BY id DESC LIMIT 1
+        )
       LEFT JOIN segments s ON s.id = dd.segment_id
       WHERE 1=1
     `;
@@ -186,7 +191,7 @@ module.exports = async function (fastify, opts) {
             const result = await harvestUnifiClients();
             return reply.send({ success: true, ...result });
         } catch (err) {
-            return reply.code(500).send({ error: true, message: err.message });
+            return reply.code(500).send({ error: true, message: safeError(err) });
         }
     });
 

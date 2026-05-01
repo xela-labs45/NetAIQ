@@ -30,12 +30,15 @@ async function runScanCycle(fastify) {
         const segments = db.prepare('SELECT id FROM segments').all();
 
         for (const seg of segments) {
-            // Again check if critical ping started while we were picking the next segment
+            // Wait for critical ping to finish, capped at 60s to avoid permanent stall
             if (criticalPingJob.getStatus && criticalPingJob.getStatus().isExecuting) {
                 fastify.log.info(`Pausing segment scan before segment ${seg.id} because critical ping started.`);
-                // Wait for it to finish by sleeping 5 seconds and checking again
-                while (criticalPingJob.getStatus().isExecuting) {
+                const deadline = Date.now() + 60000;
+                while (criticalPingJob.getStatus().isExecuting && Date.now() < deadline) {
                     await new Promise(res => setTimeout(res, 5000));
+                }
+                if (criticalPingJob.getStatus().isExecuting) {
+                    fastify.log.warn('Critical ping still running after 60s — proceeding with segment scan anyway.');
                 }
             }
 
