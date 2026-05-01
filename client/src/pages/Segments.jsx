@@ -22,6 +22,7 @@ export default function Segments() {
   const [formData, setFormData] = useState({ name: '', cidr: '', description: '', color: '#3b82f6' });
   const [scanProgress, setScanProgress] = useState({}); // { [segmentId]: { scanned, total, status, current_ip } }
   const [expandedScans, setExpandedScans] = useState({});
+  const expandedScansRef = React.useRef({});
   const [localScans, setLocalScans] = useState({});
 
   // ARP Discovery state
@@ -34,6 +35,10 @@ export default function Segments() {
     queryFn: () => axios.get('/api/v1/discovery/capability').then(res => res.data),
     staleTime: 5 * 60 * 1000 // match backend cache
   });
+
+  useEffect(() => {
+    expandedScansRef.current = expandedScans;
+  }, [expandedScans]);
 
   useEffect(() => {
     if (socket) {
@@ -50,8 +55,8 @@ export default function Segments() {
           delete newState[data.segment_id];
           return newState;
         });
-        queryClient.invalidateQueries(['segments']);
-        if (expandedScans[data.segment_id]) {
+        queryClient.invalidateQueries({ queryKey: ['segments'] });
+        if (expandedScansRef.current[data.segment_id]) {
           fetchScans(data.segment_id).then(scans => {
             setLocalScans(prev => ({ ...prev, [data.segment_id]: scans }));
           });
@@ -162,8 +167,12 @@ export default function Segments() {
     setExpandedScans(prev => ({ ...prev, [id]: !isExpanded }));
 
     if (!isExpanded) {
-      const scans = await fetchScans(id);
-      setLocalScans(prev => ({ ...prev, [id]: scans }));
+      try {
+        const scans = await fetchScans(id);
+        setLocalScans(prev => ({ ...prev, [id]: scans }));
+      } catch (err) {
+        console.error('Failed to load scan history:', err);
+      }
     }
   };
 
@@ -237,11 +246,11 @@ export default function Segments() {
 
                 <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
                   <Typography variant="body2" color="text.secondary">Configured Devices</Typography>
-                  <Typography variant="body2" fontWeight="bold">{seg.device_count}</Typography>
+                  <Typography variant="body2" fontWeight="bold">{seg.registered_count}</Typography>
                 </Box>
                 <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 3 }}>
                   <Typography variant="body2" color="text.secondary">Online Devices</Typography>
-                  <Typography variant="body2" fontWeight="bold" color="success.main">{seg.devices_up}</Typography>
+                  <Typography variant="body2" fontWeight="bold" color="success.main">{seg.online_count}</Typography>
                 </Box>
 
                 {/* ICMP Scan progress */}
