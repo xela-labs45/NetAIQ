@@ -375,6 +375,19 @@ Ensure your `JWT_SECRET` in `.env` is a long, random string. If you changed it w
 
 ---
 
+## ☕ Support the Project
+
+NetMon is free and open-source. If it saves you time or helps keep your network reliable, consider buying me a coffee — it goes directly toward continued development, bug fixes, and new features.
+
+| Platform | Link |
+|---|---|
+| **Ko-fi** | [ko-fi.com/xela_labs](https://ko-fi.com/xela_labs) |
+| **PayPal** | [paypal.me/WebDevByElectric](https://paypal.me/WebDevByElectric) |
+
+No pressure — a GitHub star or sharing the project is just as appreciated. 🙏
+
+---
+
 <div align="center">
 
 Made with ❤️ for small and medium business network administrators
