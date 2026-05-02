@@ -546,16 +546,21 @@ export default function Dashboard() {
                                     </Box>
                                     <Typography variant="caption" sx={{ fontSize: '0.68rem', color: 'text.disabled', ml: 1, flexShrink: 0 }}>
                                         {(() => {
-                                            const d = new Date(alert.created_at);
+                                            const tz = unifiSettings?.settings?.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone;
+                                            // SQLite CURRENT_TIMESTAMP is UTC but has no 'Z'; force UTC parsing
+                                            const raw = alert.created_at;
+                                            const utcStr = raw.includes('T') ? raw : raw.replace(' ', 'T') + 'Z';
+                                            const d = new Date(utcStr);
                                             const now = new Date();
-                                            const time = d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false });
-                                            const isToday = d.toDateString() === now.toDateString();
+                                            const dateInTz = (date) => new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' }).format(date);
+                                            const isToday = dateInTz(d) === dateInTz(now);
                                             const yesterday = new Date(now);
                                             yesterday.setDate(now.getDate() - 1);
-                                            const isYesterday = d.toDateString() === yesterday.toDateString();
+                                            const isYesterday = dateInTz(d) === dateInTz(yesterday);
+                                            const time = d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: tz });
                                             if (isToday) return `Today ${time}`;
                                             if (isYesterday) return `Yesterday ${time}`;
-                                            return d.toLocaleString('en-GB', { hour12: false }).replace(/\//g, '-').replace(',', '');
+                                            return d.toLocaleString('en-GB', { hour12: false, timeZone: tz }).replace(/\//g, '-').replace(',', '');
                                         })()}
                                     </Typography>
                                 </Box>
