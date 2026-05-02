@@ -46,6 +46,11 @@ function isEnabled() {
         && !!settings.telegram_chat_id;
 }
 
+// Returns true if the specific event key is enabled (defaults to true when not yet set)
+function isEventEnabled(settings, key) {
+    return settings[key] !== '0';
+}
+
 /**
  * Send a message via the Telegram Bot API.
  * @param {string} message — HTML-formatted message body
@@ -134,6 +139,8 @@ async function appendAiSection(baseMessage, eventType, context) {
  */
 async function sendCriticalDeviceOffline(device, segmentName) {
     if (!isEnabled()) return;
+    const settings = getSettings();
+    if (!isEventEnabled(settings, 'telegram_alert_critical_offline')) return;
 
     // Look up segment CIDR for AI context
     let segmentCidr = null;
@@ -177,6 +184,8 @@ async function sendCriticalDeviceOffline(device, segmentName) {
  */
 async function sendCriticalDeviceOnline(device, segmentName, downtimeMs) {
     if (!isEnabled()) return;
+    const settings = getSettings();
+    if (!isEventEnabled(settings, 'telegram_alert_critical_online')) return;
 
     const downtimeStr = formatDowntime(downtimeMs);
 
@@ -208,6 +217,8 @@ async function sendCriticalDeviceOnline(device, segmentName, downtimeMs) {
  */
 async function sendApOffline(ap) {
     if (!isEnabled()) return;
+    const settings = getSettings();
+    if (!isEventEnabled(settings, 'telegram_alert_ap_offline')) return;
 
     const lastSeenFormatted = ap.last_seen
         ? formatInUserTimezone(ap.last_seen)
@@ -240,6 +251,8 @@ async function sendApOffline(ap) {
  */
 async function sendApOnline(ap, downtimeMs) {
     if (!isEnabled()) return;
+    const settings = getSettings();
+    if (!isEventEnabled(settings, 'telegram_alert_ap_online')) return;
 
     const downtimeStr = formatDowntime(downtimeMs);
 
@@ -269,6 +282,8 @@ async function sendApOnline(ap, downtimeMs) {
  */
 async function sendSegmentOffline(segment, expectedDevices, hostsFound) {
     if (!isEnabled()) return;
+    const settings = getSettings();
+    if (!isEventEnabled(settings, 'telegram_alert_segment_offline')) return;
 
     const baseMessage = [
         `🔴 <b>Network Segment Unreachable</b>`,

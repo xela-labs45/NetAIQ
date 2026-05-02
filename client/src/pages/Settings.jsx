@@ -57,11 +57,16 @@ export default function Settings() {
     const [email, setEmail] = useState({
         smtp_host: '', smtp_port: '587', smtp_secure: false, smtp_user: '', smtp_pass: '',
         alert_from: '', alert_to: '',
-        alert_on_offline: true, alert_on_critical_offline: true, alert_on_online: true, alert_on_high_latency: false
+        alert_on_critical_offline: true, alert_on_critical_online: true, alert_on_high_latency: false,
+        email_alert_ap_offline: false, email_alert_ap_online: false,
+        email_alert_segment_offline: false,
     });
 
     const [telegram, setTelegram] = useState({
-        telegram_bot_token: '', telegram_chat_id: '', telegram_alerts_enabled: false, telegram_ai_enhanced: false
+        telegram_bot_token: '', telegram_chat_id: '', telegram_alerts_enabled: false, telegram_ai_enhanced: false,
+        telegram_alert_critical_offline: true, telegram_alert_critical_online: true,
+        telegram_alert_ap_offline: true, telegram_alert_ap_online: true,
+        telegram_alert_segment_offline: true,
     });
 
     const [general, setGeneral] = useState({
@@ -141,17 +146,24 @@ export default function Settings() {
             smtp_pass: s.smtp_pass || '',
             alert_from: s.alert_from || '',
             alert_to: s.alert_to || '',
-            alert_on_offline: s.alert_on_offline !== '0',
             alert_on_critical_offline: s.alert_on_critical_offline !== '0',
-            alert_on_online: s.alert_on_online !== '0',
+            alert_on_critical_online: s.alert_on_critical_online !== '0',
             alert_on_high_latency: s.alert_on_high_latency === '1',
+            email_alert_ap_offline: s.email_alert_ap_offline === '1',
+            email_alert_ap_online: s.email_alert_ap_online === '1',
+            email_alert_segment_offline: s.email_alert_segment_offline === '1',
         });
 
         setTelegram({
             telegram_bot_token: s.telegram_bot_token || '',
             telegram_chat_id: s.telegram_chat_id || '',
             telegram_alerts_enabled: s.telegram_alerts_enabled === '1',
-            telegram_ai_enhanced: s.telegram_ai_enhanced === '1'
+            telegram_ai_enhanced: s.telegram_ai_enhanced === '1',
+            telegram_alert_critical_offline: s.telegram_alert_critical_offline !== '0',
+            telegram_alert_critical_online: s.telegram_alert_critical_online !== '0',
+            telegram_alert_ap_offline: s.telegram_alert_ap_offline !== '0',
+            telegram_alert_ap_online: s.telegram_alert_ap_online !== '0',
+            telegram_alert_segment_offline: s.telegram_alert_segment_offline !== '0',
         });
 
         setPolling({
@@ -545,11 +557,23 @@ export default function Settings() {
 
                         {/* Triggers */}
                         <Typography variant="h6" gutterBottom>Alert Triggers To Send Email</Typography>
-                        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, mb: 4 }}>
-                            <FormControlLabel control={<Checkbox checked={email.alert_on_offline} onChange={(e) => setEmail({ ...email, alert_on_offline: e.target.checked })} />} label="Any device goes offline" />
+
+                        <Typography variant="subtitle2" color="text.secondary" sx={{ mb: 1 }}>Device Alerts</Typography>
+                        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, mb: 3, pl: 1 }}>
                             <FormControlLabel control={<Checkbox checked={email.alert_on_critical_offline} onChange={(e) => setEmail({ ...email, alert_on_critical_offline: e.target.checked })} />} label="Critical device goes offline" />
-                            <FormControlLabel control={<Checkbox checked={email.alert_on_online} onChange={(e) => setEmail({ ...email, alert_on_online: e.target.checked })} />} label="Device comes back online" />
+                            <FormControlLabel control={<Checkbox checked={email.alert_on_critical_online} onChange={(e) => setEmail({ ...email, alert_on_critical_online: e.target.checked })} />} label="Critical device comes back online" />
                             <FormControlLabel control={<Checkbox checked={email.alert_on_high_latency} onChange={(e) => setEmail({ ...email, alert_on_high_latency: e.target.checked })} />} label="High latency detected (>200ms)" />
+                        </Box>
+
+                        <Typography variant="subtitle2" color="text.secondary" sx={{ mb: 1 }}>UniFi / AP Alerts</Typography>
+                        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, mb: 3, pl: 1 }}>
+                            <FormControlLabel control={<Checkbox checked={email.email_alert_ap_offline} onChange={(e) => setEmail({ ...email, email_alert_ap_offline: e.target.checked })} />} label="Access point goes offline" />
+                            <FormControlLabel control={<Checkbox checked={email.email_alert_ap_online} onChange={(e) => setEmail({ ...email, email_alert_ap_online: e.target.checked })} />} label="Access point comes back online" />
+                        </Box>
+
+                        <Typography variant="subtitle2" color="text.secondary" sx={{ mb: 1 }}>Network Segment Alerts</Typography>
+                        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, mb: 4, pl: 1 }}>
+                            <FormControlLabel control={<Checkbox checked={email.email_alert_segment_offline} onChange={(e) => setEmail({ ...email, email_alert_segment_offline: e.target.checked })} />} label="Segment scan returns no devices" />
                         </Box>
 
                         <Box sx={{ display: 'flex', gap: 2 }}>
@@ -628,6 +652,45 @@ export default function Settings() {
                                 </Grid>
                             )}
                         </Grid>
+
+                        {/* Per-event toggles — only visible when Telegram is enabled */}
+                        {telegram.telegram_alerts_enabled && (
+                            <Box sx={{ mt: 3, p: 2.5, bgcolor: 'rgba(255,255,255,0.03)', borderRadius: 1, border: '1px solid rgba(255,255,255,0.08)' }}>
+                                <Typography variant="subtitle2" sx={{ mb: 2, fontWeight: 600 }}>Alert Event Selection</Typography>
+
+                                <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>Device Alerts</Typography>
+                                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5, mb: 2, pl: 1 }}>
+                                    <FormControlLabel
+                                        control={<Checkbox size="small" checked={telegram.telegram_alert_critical_offline} onChange={(e) => setTelegram({ ...telegram, telegram_alert_critical_offline: e.target.checked })} />}
+                                        label={<Typography variant="body2">Critical device goes offline</Typography>}
+                                    />
+                                    <FormControlLabel
+                                        control={<Checkbox size="small" checked={telegram.telegram_alert_critical_online} onChange={(e) => setTelegram({ ...telegram, telegram_alert_critical_online: e.target.checked })} />}
+                                        label={<Typography variant="body2">Critical device comes back online</Typography>}
+                                    />
+                                </Box>
+
+                                <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>UniFi / AP Alerts</Typography>
+                                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5, mb: 2, pl: 1 }}>
+                                    <FormControlLabel
+                                        control={<Checkbox size="small" checked={telegram.telegram_alert_ap_offline} onChange={(e) => setTelegram({ ...telegram, telegram_alert_ap_offline: e.target.checked })} />}
+                                        label={<Typography variant="body2">Access point goes offline</Typography>}
+                                    />
+                                    <FormControlLabel
+                                        control={<Checkbox size="small" checked={telegram.telegram_alert_ap_online} onChange={(e) => setTelegram({ ...telegram, telegram_alert_ap_online: e.target.checked })} />}
+                                        label={<Typography variant="body2">Access point comes back online</Typography>}
+                                    />
+                                </Box>
+
+                                <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>Network Segment Alerts</Typography>
+                                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5, pl: 1 }}>
+                                    <FormControlLabel
+                                        control={<Checkbox size="small" checked={telegram.telegram_alert_segment_offline} onChange={(e) => setTelegram({ ...telegram, telegram_alert_segment_offline: e.target.checked })} />}
+                                        label={<Typography variant="body2">Segment scan returns no devices</Typography>}
+                                    />
+                                </Box>
+                            </Box>
+                        )}
 
                         {/* AI-Enhanced Alerts — only visible when Telegram is enabled */}
                         {telegram.telegram_alerts_enabled && (

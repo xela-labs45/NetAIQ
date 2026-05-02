@@ -1,6 +1,7 @@
 const db = require('../db/database');
 const { scanSegment } = require('../services/scanService');
 const telegramService = require('../services/telegramService');
+const alertService = require('../services/alertService');
 const criticalPingJob = require('./criticalPingJob'); // to check if it's executing
 
 let currentTimer = null;
@@ -53,9 +54,17 @@ async function runScanCycle(fastify) {
 
                     if (hostsUp === 0 && expectedDevices > 0) {
                         if (!previousSegmentZeros.has(seg.id)) {
-                            fastify.log.warn(`Segment ${seg.id} offline (expected ${expectedDevices}, found 0). Sending Telegram alert.`);
+                            fastify.log.warn(`Segment ${seg.id} offline (expected ${expectedDevices}, found 0). Sending alerts.`);
                             const segment = db.prepare('SELECT name, cidr FROM segments WHERE id = ?').get(seg.id);
                             telegramService.sendSegmentOffline(segment, expectedDevices, hostsUp);
+                            const segEmailPref = db.prepare("SELECT value FROM settings WHERE key = 'email_alert_segment_offline'").get();
+                            if (segEmailPref?.value === '1') {
+                                alertService.sendEmailAlert({
+                                    alert_type: 'segment_offline',
+                                    message: `Network segment "${segment.name}" (${segment.cidr}) is unreachable. Expected ${expectedDevices} devices, found 0.`,
+                                    severity: 'critical'
+                                });
+                            }
                             previousSegmentZeros.add(seg.id);
                         }
                     } else if (hostsUp > 0) {

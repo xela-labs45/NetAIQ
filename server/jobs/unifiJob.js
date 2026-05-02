@@ -62,11 +62,14 @@ module.exports = function (fastify) {
                         severity: 'critical',
                         fastify
                     });
-                    await alertService.sendEmailAlert({
-                        alert_type: 'ap_disconnected',
-                        message: `CRITICAL: ${wlan.num_disconnected} AP(s) offline`,
-                        severity: 'critical'
-                    });
+                    const apOfflinePref = db.prepare("SELECT value FROM settings WHERE key = 'email_alert_ap_offline'").get();
+                    if (apOfflinePref?.value === '1') {
+                        await alertService.sendEmailAlert({
+                            alert_type: 'ap_disconnected',
+                            message: `CRITICAL: ${wlan.num_disconnected} AP(s) offline`,
+                            severity: 'critical'
+                        });
+                    }
                     fastify.io.emit('alert:new', {
                         type: 'ap_disconnected',
                         severity: 'critical',
@@ -83,6 +86,14 @@ module.exports = function (fastify) {
                         severity: 'info',
                         fastify
                     });
+                    const apOnlinePref = db.prepare("SELECT value FROM settings WHERE key = 'email_alert_ap_online'").get();
+                    if (apOnlinePref?.value === '1') {
+                        await alertService.sendEmailAlert({
+                            alert_type: 'ap_reconnected',
+                            message: `Access point(s) reconnected. All ${wlan.num_ap} APs now online.`,
+                            severity: 'info'
+                        });
+                    }
                     fastify.io.emit('alert:new', {
                         type: 'ap_reconnected',
                         severity: 'info',
