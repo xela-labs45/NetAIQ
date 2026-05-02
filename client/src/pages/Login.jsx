@@ -4,7 +4,7 @@ import { useLocation } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 
 export default function Login() {
-    const [email, setEmail] = useState('');
+    const [username, setUsername] = useState('');
     const [password, setPassword] = useState('');
     const [error, setError] = useState('');
     const [loading, setLoading] = useState(false);
@@ -18,7 +18,7 @@ export default function Login() {
         setLoading(true);
 
         try {
-            await login(email, password);
+            await login(username, password);
         } catch (err) {
             setError(err.response?.data?.message || 'Login failed. Please check your credentials.');
         } finally {
@@ -62,13 +62,13 @@ export default function Login() {
                 <form onSubmit={handleSubmit}>
                     <TextField
                         fullWidth
-                        label="Email Address"
+                        label="Username"
                         variant="outlined"
                         margin="normal"
-                        value={email}
-                        onChange={(e) => setEmail(e.target.value)}
+                        value={username}
+                        onChange={(e) => setUsername(e.target.value)}
                         required
-                        autoComplete="email"
+                        autoComplete="username"
                         autoFocus
                     />
                     <TextField

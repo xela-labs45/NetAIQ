@@ -70,4 +70,20 @@ try {
     }
 }
 
+// Migration: Add username column to users table if not exists
+try {
+    db.prepare("ALTER TABLE users ADD COLUMN username TEXT UNIQUE").run();
+    console.log('Database Migration: Added username column to users table.');
+    // Populate existing users with username derived from their email prefix
+    const existingUsers = db.prepare("SELECT id, email FROM users WHERE username IS NULL").all();
+    for (const u of existingUsers) {
+        const derived = u.email.split('@')[0].replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 31);
+        db.prepare("UPDATE users SET username = ? WHERE id = ?").run(derived, u.id);
+    }
+} catch (err) {
+    if (!err.message.includes('duplicate column name')) {
+        console.warn('Database Migration Warning (username column):', err.message);
+    }
+}
+
 module.exports = db;

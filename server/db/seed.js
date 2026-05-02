@@ -13,10 +13,10 @@ async function seed() {
         const hash = await bcrypt.hash(defaultPassword, saltRounds);
 
         db.prepare(`
-      INSERT INTO users (email, password_hash, must_change_password)
-      VALUES (?, ?, 1)
-    `).run('admin@netaiq.local', hash);
-        console.log('Admin user created: admin@netaiq.local / Admin@1234');
+      INSERT INTO users (username, email, password_hash, must_change_password)
+      VALUES (?, ?, ?, 1)
+    `).run('admin', 'admin@netaiq.local', hash);
+        console.log('Admin user created: username=admin / Admin@1234');
     } else {
         console.log('Admin user already exists.');
     }

@@ -109,11 +109,11 @@ Navigate to **[https://localhost:3443](https://localhost:3443)** (or your config
 
 | Field | Value |
 |---|---|
-| Email | `admin@netaiq.local` |
+| Username | `admin` |
 | Password | `Admin@1234` |
 
 > [!WARNING]
-> You will be prompted to change your password on first login.
+> On first login you will be prompted to choose a unique username and set a new password before accessing the dashboard.
 
 ---
 

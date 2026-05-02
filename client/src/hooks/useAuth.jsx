@@ -25,8 +25,8 @@ export function AuthProvider({ children }) {
             });
     }, []);
 
-    const login = async (email, password) => {
-        const res = await axios.post('/api/v1/auth/login', { email, password });
+    const login = async (username, password) => {
+        const res = await axios.post('/api/v1/auth/login', { username, password });
 
         // Automatically fetch user info right after a successful login
         const meRes = await axios.get('/api/v1/auth/me');

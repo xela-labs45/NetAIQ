@@ -188,21 +188,45 @@ module.exports = async function (fastify, opts) {
     });
 
     fastify.put('/password', async (request, reply) => {
-        const { current_password, new_password } = request.body;
+        const { current_password, new_password, new_username } = request.body;
 
         if (!new_password || new_password.length < 12) {
             return reply.code(400).send({ error: true, message: 'New password must be at least 12 characters.' });
         }
 
         const user = db.prepare('SELECT * FROM users WHERE id = ?').get(request.user.id);
-        const match = await bcrypt.compare(current_password, user.password_hash);
 
+        // Require username setup on first login
+        if (user.must_change_password === 1) {
+            if (!new_username || !new_username.trim()) {
+                return reply.code(400).send({ error: true, message: 'A username is required during initial account setup.' });
+            }
+        }
+
+        if (new_username !== undefined) {
+            const trimmed = new_username.trim();
+            if (!/^[a-zA-Z0-9][a-zA-Z0-9_-]{2,30}$/.test(trimmed)) {
+                return reply.code(400).send({ error: true, message: 'Username must be 3–31 characters and may only contain letters, numbers, underscores, and hyphens.' });
+            }
+            const taken = db.prepare('SELECT id FROM users WHERE username = ? AND id != ?').get(trimmed, user.id);
+            if (taken) {
+                return reply.code(400).send({ error: true, message: 'That username is already taken.' });
+            }
+        }
+
+        const match = await bcrypt.compare(current_password, user.password_hash);
         if (!match) {
             return reply.code(400).send({ error: true, message: 'Incorrect current password' });
         }
 
         const hash = await bcrypt.hash(new_password, 12);
-        db.prepare('UPDATE users SET password_hash = ?, must_change_password = 0 WHERE id = ?').run(hash, user.id);
+
+        if (new_username !== undefined) {
+            db.prepare('UPDATE users SET password_hash = ?, username = ?, must_change_password = 0 WHERE id = ?')
+                .run(hash, new_username.trim(), user.id);
+        } else {
+            db.prepare('UPDATE users SET password_hash = ?, must_change_password = 0 WHERE id = ?').run(hash, user.id);
+        }
 
         reply.send({ success: true });
     });
