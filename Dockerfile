@@ -48,9 +48,13 @@ WORKDIR /app
 # Ensure data directory exists and is owned by the node user (UID 1000)
 RUN mkdir -p /app/data && chown -R node:node /app
 
-# Copy package.json and only install production dependencies
+# Copy package.json and only install production dependencies.
+# better-sqlite3 has no musl prebuilt, so it must compile from source on Alpine.
+# Build tools are installed then pruned in a single layer to keep image size down.
 COPY --chown=node:node package*.json ./
-RUN npm install --omit=dev
+RUN apk add --no-cache python3 make g++ && \
+    npm install --omit=dev && \
+    apk del python3 make g++
 
 # Copy built files from the build stage
 COPY --from=build --chown=node:node /app/server ./server
