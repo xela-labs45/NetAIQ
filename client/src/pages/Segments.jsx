@@ -24,6 +24,7 @@ export default function Segments() {
   const [expandedScans, setExpandedScans] = useState({});
   const expandedScansRef = React.useRef({});
   const [localScans, setLocalScans] = useState({});
+  const [scansLoading, setScansLoading] = useState({});
 
   // ARP Discovery state
   const [arpProgress, setArpProgress] = useState(null); // { stage, cidr, status, macs_found }
@@ -103,6 +104,7 @@ export default function Segments() {
     mutationFn: (newSeg) => axios.post('/api/v1/segments', newSeg),
     onSuccess: () => {
       queryClient.invalidateQueries(['segments']);
+      queryClient.invalidateQueries(['discoveryCapability']);
       setFormData({ name: '', cidr: '', description: '', color: '#3b82f6' });
       handleClose();
     }
@@ -110,7 +112,10 @@ export default function Segments() {
 
   const deleteMutation = useMutation({
     mutationFn: (id) => axios.delete(`/api/v1/segments/${id}`),
-    onSuccess: () => queryClient.invalidateQueries(['segments'])
+    onSuccess: () => {
+      queryClient.invalidateQueries(['segments']);
+      queryClient.invalidateQueries(['discoveryCapability']);
+    }
   });
 
   const handleScan = async (id) => {
@@ -167,11 +172,14 @@ export default function Segments() {
     setExpandedScans(prev => ({ ...prev, [id]: !isExpanded }));
 
     if (!isExpanded) {
+      setScansLoading(prev => ({ ...prev, [id]: true }));
       try {
         const scans = await fetchScans(id);
         setLocalScans(prev => ({ ...prev, [id]: scans }));
       } catch (err) {
         console.error('Failed to load scan history:', err);
+      } finally {
+        setScansLoading(prev => ({ ...prev, [id]: false }));
       }
     }
   };
@@ -351,6 +359,7 @@ export default function Segments() {
                   </AccordionSummary>
                   <AccordionDetails sx={{ p: 1, maxHeight: 200, overflowY: 'auto' }}>
                     {(() => {
+                      if (scansLoading[seg.id]) return <CircularProgress size={16} sx={{ display: 'block', mx: 'auto', my: 1 }} />;
                       const scans = localScans[seg.id] || [];
                       if (scans.length === 0) return <Typography variant="caption" color="text.secondary">No scans yet.</Typography>;
 

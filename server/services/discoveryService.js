@@ -194,6 +194,10 @@ function getServerL2Segment() {
 
 let capabilityCache = null;
 
+function clearCapabilityCache() {
+    capabilityCache = null;
+}
+
 /**
  * Runtime check of what discovery tools are available in this environment.
  * Results are cached for 5 minutes.
@@ -350,6 +354,9 @@ function upsertDevice(device) {
             );
             macTrackingStats.inserted++;
             console.log(`[Discovery] New device: ${mac} (IP: ${device.ip}, Vendor: ${oui?.manufacturer || 'Unknown'}, Source: ${device.source})`);
+            if (oui) {
+                saveOuiIdentification(mac, oui, device.hostname);
+            }
             return { action: 'inserted', mac, id: result.lastInsertRowid };
         } catch (err) {
             if (err.message && err.message.includes('UNIQUE constraint failed')) {
@@ -359,6 +366,56 @@ function upsertDevice(device) {
             throw err;
         }
     }
+}
+
+// ─── OUI Auto-Identification ────────────────────────────────────────
+
+function saveOuiIdentification(mac, oui, hostname) {
+    try {
+        db.prepare('DELETE FROM ai_device_identifications WHERE mac_address = ? AND device_id IS NULL').run(mac);
+        db.prepare(`
+            INSERT INTO ai_device_identifications
+                (mac_address, device_type_suggestion, manufacturer, os_guess, owner_type, confidence, reasoning, suggested_name, provider, model)
+            VALUES (?, ?, ?, ?, 'unknown', ?, ?, ?, 'oui_lookup', 'mac_oui')
+        `).run(
+            mac,
+            oui.device_type || null,
+            oui.manufacturer,
+            oui.os_guess || null,
+            oui.confidence,
+            `Identified via MAC OUI prefix. Manufacturer: ${oui.manufacturer}.${oui.note ? ' ' + oui.note : ''}`,
+            hostname || `${oui.manufacturer} Device`
+        );
+        db.prepare('UPDATE discovered_devices SET ai_identified = 1 WHERE mac_address = ?').run(mac);
+    } catch (e) {
+        console.error(`[Discovery] OUI identification save failed for ${mac}:`, e.message);
+    }
+}
+
+/**
+ * OUI-identify all discovered_devices with ai_identified = 0.
+ * Runs against local MAC OUI database only — no AI calls.
+ * Returns the number of newly identified devices.
+ */
+function ouiIdentifyUnprocessed() {
+    const unidentified = db.prepare(
+        'SELECT mac_address, hostname FROM discovered_devices WHERE ai_identified = 0'
+    ).all();
+
+    let processed = 0;
+    for (const device of unidentified) {
+        const cleanMac = normaliseMac(device.mac_address);
+        if (!cleanMac) continue;
+        const oui = lookupMac(cleanMac);
+        if (!oui) continue;
+        saveOuiIdentification(cleanMac, oui, device.hostname);
+        processed++;
+    }
+
+    if (processed > 0) {
+        console.log(`[Discovery] OUI auto-identified ${processed} device(s)`);
+    }
+    return processed;
 }
 
 // ─── Source 1: UniFi Harvest ────────────────────────────────────────
@@ -756,6 +813,7 @@ async function arpScanL2Segment(io) {
 
 module.exports = {
     checkDiscoveryCapability,
+    clearCapabilityCache,
     getServerL2Segment,
     harvestUnifiClients,
     arpScanL2Segment,
@@ -764,5 +822,6 @@ module.exports = {
     findSegmentForIp,
     normaliseMac,
     getMacTrackingStats,
-    resetMacTrackingStats
+    resetMacTrackingStats,
+    ouiIdentifyUnprocessed
 };

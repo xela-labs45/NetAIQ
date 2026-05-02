@@ -1,4 +1,5 @@
 const { detectAnomalies, summariseAlerts, getAiStatus } = require('../services/aiService');
+const { ouiIdentifyUnprocessed } = require('../services/discoveryService');
 const db = require('../db/database');
 const settingsService = require('../services/settingsService');
 
@@ -59,6 +60,16 @@ function startAiJobs(fastify) {
     await runTriageJob(fastify, false);
   }, triageMins * 60 * 1000);
 
+
+  // OUI auto-identification: run at startup for existing unidentified devices,
+  // then every 5 minutes for newly discovered ones.
+  setTimeout(() => {
+    try { ouiIdentifyUnprocessed(); } catch (e) { console.error('OUI startup job error:', e.message); }
+  }, 5000);
+
+  setInterval(() => {
+    try { ouiIdentifyUnprocessed(); } catch (e) { console.error('OUI periodic job error:', e.message); }
+  }, 5 * 60 * 1000);
 
   console.log(`AI jobs started — anomaly: ${anomalyMins}min, triage: ${triageMins}min`);
 }

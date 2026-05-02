@@ -3,6 +3,7 @@ const { z } = require('zod');
 const { scanSegment } = require('../services/scanService');
 const mergeService = require('../services/mergeService');
 const { Netmask } = require('netmask');
+const { clearCapabilityCache } = require('../services/discoveryService');
 
 const segmentSchema = z.object({
     name: z.string().min(1, 'Name is required'),
@@ -56,6 +57,7 @@ module.exports = async function (fastify, opts) {
             const stmt = db.prepare('INSERT INTO segments (name, cidr, description, color) VALUES (?, ?, ?, ?)');
             const info = stmt.run(name, cidr, description || null, color || null);
             const segment = db.prepare('SELECT * FROM segments WHERE id = ?').get(info.lastInsertRowid);
+            clearCapabilityCache();
             reply.send({ segment });
         } catch (err) {
             reply.code(500).send({ error: true, message: err.message });
@@ -76,12 +78,14 @@ module.exports = async function (fastify, opts) {
         db.prepare('UPDATE segments SET name = ?, cidr = ?, description = ?, color = ? WHERE id = ?')
             .run(name, cidr, description || null, color || null, id);
         const segment = db.prepare('SELECT * FROM segments WHERE id = ?').get(id);
+        clearCapabilityCache();
         reply.send({ segment });
     });
 
     fastify.delete('/:id', async (request, reply) => {
         const { id } = request.params;
         db.prepare('DELETE FROM segments WHERE id = ?').run(id);
+        clearCapabilityCache();
         reply.send({ success: true });
     });
 
