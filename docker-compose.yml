@@ -16,6 +16,9 @@ services:
     # the container to send/receive raw network packets
     # on the host network. Remove if not using MAC
     # discovery on Linux hosts.
+    # NOTE: On Windows Docker Desktop (WSL2/Hyper-V), these capabilities
+    # are accepted without error but have no effect — ARP/MAC discovery
+    # will not function on Windows hosts regardless.
     cap_add:
       - NET_RAW
       - NET_ADMIN
