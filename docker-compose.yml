@@ -1,5 +1,5 @@
 services:
-  netmon:
+  netaiq:
     build: .
     # EXPOSE: Internal port for Caddy proxy. Keep this if using the internal Caddy service.
     expose:
@@ -40,7 +40,7 @@ services:
       - caddy_data:/data
       - caddy_config:/config
     depends_on:
-      - netmon
+      - netaiq
 
 volumes:
   caddy_data:

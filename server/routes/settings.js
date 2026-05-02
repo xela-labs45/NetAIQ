@@ -142,7 +142,7 @@ module.exports = async function (fastify, opts) {
         const result = await sendEmailAlert({
             severity: 'info',
             alert_type: 'test_email',
-            message: 'This is a test email sent from the NetMon settings page.'
+            message: 'This is a test email sent from the NetAIQ settings page.'
         });
 
         if (result) {

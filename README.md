@@ -1,8 +1,8 @@
 <div align="center">
 
-# 🖥️ NetMon Dashboard
+# NetAIQ Dashboard
 
-**A self-hosted SMB network monitoring dashboard with real-time device tracking, alerting, and UniFi integration.**
+**A self-hosted AI-powered SMB network monitoring dashboard with real-time device tracking, alerting, and UniFi integration.**
 
 [![Node.js](https://img.shields.io/badge/Node.js-20-brightgreen?logo=node.js)](https://nodejs.org)
 [![React](https://img.shields.io/badge/React-18-61dafb?logo=react)](https://reactjs.org)
@@ -55,8 +55,8 @@
 ### 1. Clone the repository
 
 ```bash
-git clone https://github.com/yourusername/netmon-dashboard.git
-cd netmon-dashboard
+git clone https://github.com/yourusername/netaiq-dashboard.git
+cd netaiq-dashboard
 ```
 
 ### 2. Create your environment file
@@ -71,7 +71,7 @@ Edit `.env` and set a strong `JWT_SECRET`. UniFi, email, and notification settin
 PORT=3001
 NODE_ENV=production
 JWT_SECRET=your_strong_random_secret_here
-DB_PATH=./data/netmon.db
+DB_PATH=./data/netaiq.db
 
 # SSL / Proxy Settings
 SITE_ADDRESS=localhost
@@ -81,7 +81,7 @@ HTTPS_PORT=3443
 
 ### 3. SSL Configuration (Caddy)
 
-NetMon uses **Caddy** as a reverse proxy for automatic SSL/HTTPS.
+NetAIQ uses **Caddy** as a reverse proxy for automatic SSL/HTTPS.
 
 - **Local use**: Keep `SITE_ADDRESS=localhost` or set it to your server's LAN IP. Caddy issues a self-signed certificate.
 - **Public use**: Set `SITE_ADDRESS` to your domain. Ensure ports 80 and 443 point to your server for Let's Encrypt.
@@ -90,7 +90,7 @@ NetMon uses **Caddy** as a reverse proxy for automatic SSL/HTTPS.
 > To access the dashboard from another machine on your network, set `SITE_ADDRESS` to your server's LAN IP (e.g., `192.168.1.1`) and restart with `docker compose down && docker compose up -d`.
 
 > [!TIP]
-> To use your own reverse proxy (Nginx, Traefik, etc.), disable the Caddy service in `docker-compose.yml` and uncomment the `ports` section for the `netmon` service.
+> To use your own reverse proxy (Nginx, Traefik, etc.), disable the Caddy service in `docker-compose.yml` and uncomment the `ports` section for the `netaiq` service.
 
 ### 4. Build and run
 
@@ -109,7 +109,7 @@ Navigate to **[https://localhost:3443](https://localhost:3443)** (or your config
 
 | Field | Value |
 |---|---|
-| Email | `admin@netmon.local` |
+| Email | `admin@netaiq.local` |
 | Password | `Admin@1234` |
 
 > [!WARNING]
@@ -150,7 +150,7 @@ All settings are managed from the **Settings** page in the UI after logging in.
 2. Visit `https://api.telegram.org/bot<YOUR_TOKEN>/getUpdates` in a browser.
 3. Find `chat_id` in the JSON response. Group chat IDs are negative numbers.
 
-### 3. Configure in NetMon
+### 3. Configure in NetAIQ
 1. Navigate to **Settings > Telegram**.
 2. Toggle **Enable Telegram Notifications** on.
 3. Paste your **Bot Token** and **Chat ID**.
@@ -178,7 +178,7 @@ Each event type is individually toggleable. All are enabled by default.
 
 ## 🔍 Scanning Architecture
 
-NetMon uses a split-polling strategy to balance low-latency monitoring for critical infrastructure with broad visibility across multiple subnets.
+NetAIQ uses a split-polling strategy to balance low-latency monitoring for critical infrastructure with broad visibility across multiple subnets.
 
 ### Critical Device Polling
 - **Scope**: Devices tagged as "Critical" in the UI
@@ -216,7 +216,7 @@ An API key from [Anthropic](https://console.anthropic.com/) or [OpenRouter](http
 - **Alert Triage**: Groups recent alerts into logical patterns with recommended actions. Token-efficient — skips analysis when no new alerts have occurred.
 
 ### Device Discovery
-NetMon uses a dual-source discovery system:
+NetAIQ uses a dual-source discovery system:
 
 - **UniFi Harvest**: Pulls active WiFi/Wired clients and up to 4 weeks of historical device data from your UniFi Controller.
 - **ARP Scanning**: An L2-segment-aware `nmap` ARP scanner. Auto-detects the server's LAN segment and scans for wired devices using raw sockets, with fallbacks to `ip neigh` and `arp -a`.
@@ -303,7 +303,7 @@ npm run dev
 ## 📁 Project Structure
 
 ```
-netmon-dashboard/
+netaiq-dashboard/
 ├── client/                  # React frontend (Vite)
 │   └── src/
 │       ├── components/      # Reusable UI components
@@ -315,6 +315,7 @@ netmon-dashboard/
 │   ├── routes/              # API route handlers
 │   └── services/            # Business logic (ping, UniFi, scan, alert, email)
 ├── data/                    # SQLite database (auto-created, persisted via volume)
+├── netaiq-brand/            # Brand assets (SVG/PNG source files)
 ├── Dockerfile
 ├── docker-compose.yml
 └── .env.example
@@ -330,7 +331,7 @@ This project is licensed under the [MIT License](LICENSE).
 
 ## ☕ Support the Project
 
-NetMon is free and open-source. If it saves you time or helps keep your network reliable, consider buying me a coffee — it goes directly toward continued development, bug fixes, and new features.
+NetAIQ is free and open-source. If it saves you time or helps keep your network reliable, consider buying me a coffee — it goes directly toward continued development, bug fixes, and new features.
 
 | Platform | Link |
 |---|---|

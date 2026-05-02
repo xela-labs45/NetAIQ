@@ -4,11 +4,11 @@ const theme = createTheme({
     palette: {
         mode: 'dark',
         background: {
-            default: '#0a0f1e',
-            paper: '#111827',
+            default: '#0A1628',
+            paper: '#0d1f3c',
         },
         primary: {
-            main: '#3b82f6',
+            main: '#0066FF',
         },
         success: {
             main: '#22c55e',
@@ -20,7 +20,7 @@ const theme = createTheme({
             main: '#f59e0b',
         },
         info: {
-            main: '#2196f3',
+            main: '#00E5FF',
         }
     },
     typography: {

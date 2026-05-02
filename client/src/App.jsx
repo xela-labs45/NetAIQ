@@ -8,6 +8,7 @@ import Bandwidth from './pages/Bandwidth';
 import Alerts from './pages/Alerts';
 import Settings from './pages/Settings';
 import Insights from './pages/Insights';
+import ChangePassword from './pages/ChangePassword';
 import AppLoader from './components/AppLoader';
 import { useAuth } from './hooks/useAuth';
 
@@ -18,6 +19,10 @@ function PrivateRoute({ children }) {
 
     if (!user) {
         return <Navigate to="/login" />;
+    }
+
+    if (user.must_change_password) {
+        return <Navigate to="/change-password" />;
     }
 
     return children;
@@ -53,6 +58,7 @@ function App() {
     return (
         <Routes>
             <Route path="/login" element={<Login />} />
+            <Route path="/change-password" element={<ChangePassword />} />
             <Route path="/" element={<PrivateRoute><Layout /></PrivateRoute>}>
                 <Route index element={<Navigate to="/dashboard" replace />} />
                 <Route path="dashboard" element={

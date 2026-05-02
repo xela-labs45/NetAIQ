@@ -3,7 +3,7 @@ const path = require('path');
 const fs = require('fs');
 require('dotenv').config();
 
-const dbPath = process.env.DB_PATH || path.join(__dirname, '../../data/netmon.db');
+const dbPath = process.env.DB_PATH || path.join(__dirname, '../../data/netaiq.db');
 
 // Ensure data directory exists
 const dir = path.dirname(dbPath);

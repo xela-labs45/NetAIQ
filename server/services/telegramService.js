@@ -314,7 +314,7 @@ async function sendSegmentOffline(segment, expectedDevices, hostsFound) {
  */
 async function sendTestMessage() {
     const message = [
-        `✅ <b>NetMon Test Notification</b>`,
+        `✅ <b>NetAIQ Test Notification</b>`,
         ``,
         `Your Telegram alerts are configured correctly.`,
         `<b>Time:</b> ${formatTimestamp()}`

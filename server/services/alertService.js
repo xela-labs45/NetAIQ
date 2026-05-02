@@ -31,9 +31,9 @@ async function sendEmailAlert(alert) {
 
     try {
         await transporter.sendMail({
-            from: alert_from || 'netmon@localhost',
+            from: alert_from || 'netaiq@localhost',
             to: alert_to,
-            subject: `[NetMon] ${alert.severity.toUpperCase()} Alert: ${alert.alert_type}`,
+            subject: `[NetAIQ] ${alert.severity.toUpperCase()} Alert: ${alert.alert_type}`,
             text: `Alert Details:
 Type: ${alert.alert_type}
 Severity: ${alert.severity}

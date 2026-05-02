@@ -204,8 +204,8 @@ async function callOpenRouter(systemPrompt, userPrompt, maxTokens, model) {
         headers: {
           'Authorization': `Bearer ${apiKey}`,
           'Content-Type': 'application/json',
-          'HTTP-Referer': 'https://netmon.local',
-          'X-Title': 'NetMon Network Dashboard'
+          'HTTP-Referer': 'https://netaiq.local',
+          'X-Title': 'NetAIQ Network Dashboard'
         },
         body: JSON.stringify({
           model: resolvedModel,
@@ -259,8 +259,8 @@ async function testConnection(provider, apiKey, model) {
           headers: {
             'Authorization': `Bearer ${apiKey}`,
             'Content-Type': 'application/json',
-            'HTTP-Referer': 'https://netmon.local',
-            'X-Title': 'NetMon Network Dashboard'
+            'HTTP-Referer': 'https://netaiq.local',
+            'X-Title': 'NetAIQ Network Dashboard'
           },
           body: JSON.stringify({
             model: model || 'mistralai/mistral-7b-instruct',

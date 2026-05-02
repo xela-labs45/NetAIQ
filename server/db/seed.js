@@ -5,7 +5,7 @@ async function seed() {
     console.log('Seeding database...');
 
     // Check if admin user exists
-    const checkUser = db.prepare('SELECT id FROM users WHERE email = ?').get('admin@netmon.local');
+    const checkUser = db.prepare('SELECT id FROM users WHERE email = ?').get('admin@netaiq.local');
 
     if (!checkUser) {
         const saltRounds = 12;
@@ -15,8 +15,8 @@ async function seed() {
         db.prepare(`
       INSERT INTO users (email, password_hash, must_change_password)
       VALUES (?, ?, 1)
-    `).run('admin@netmon.local', hash);
-        console.log('Admin user created: admin@netmon.local / Admin@1234');
+    `).run('admin@netaiq.local', hash);
+        console.log('Admin user created: admin@netaiq.local / Admin@1234');
     } else {
         console.log('Admin user already exists.');
     }
@@ -35,7 +35,7 @@ async function seed() {
             ['smtp_secure', '0'],
             ['smtp_user', ''],
             ['smtp_pass', ''],
-            ['alert_from', 'netmon@local'],
+            ['alert_from', 'netaiq@local'],
             ['alert_to', 'admin@local'],
             ['alert_on_offline', '1'],
             ['alert_on_critical_offline', '1'],

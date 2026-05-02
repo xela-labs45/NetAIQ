@@ -8,5 +8,5 @@
 	# Caddy automatically uses internal SSL for these local addresses.
 	# For public domains, it will automatically use Let's Encrypt.
 	tls internal
-	reverse_proxy netmon:3001
+	reverse_proxy netaiq:3001
 }

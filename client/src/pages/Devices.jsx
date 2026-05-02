@@ -157,9 +157,10 @@ export default function Devices() {
   const enrichedDevices = useMemo(() => {
     return devices.map(d => {
       const merged = onlineLookup.get(d.ip_address);
+      const dbIsWired = d.is_wired === 1 || d.is_wired === true ? true : (d.is_wired === 0 || d.is_wired === false ? false : null);
       return {
         ...d,
-        is_wired: merged ? merged.is_wired : null,
+        is_wired: merged && merged.is_wired !== undefined && merged.is_wired !== null ? merged.is_wired : dbIsWired,
         merged_source: merged?.source || null,
       };
     });

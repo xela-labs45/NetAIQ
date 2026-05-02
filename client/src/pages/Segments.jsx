@@ -336,7 +336,7 @@ export default function Segments() {
 
                   {/* Non-L2 segments: info chip */}
                   {!isL2Segment(seg.id) && (
-                    <Tooltip title="This segment is on a different Layer 2 network from the NetMon server. Wired device MACs cannot be discovered via ARP across network boundaries. WiFi device MACs are available through the UniFi API.">
+                    <Tooltip title="This segment is on a different Layer 2 network from the NetAIQ server. Wired device MACs cannot be discovered via ARP across network boundaries. WiFi device MACs are available through the UniFi API.">
                       <Chip
                         icon={<InfoIcon />}
                         label="WiFi MACs via UniFi"

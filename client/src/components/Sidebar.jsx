@@ -12,7 +12,6 @@ import {
     NotificationsOutlined as NotificationsIcon,
     Settings as SettingsIcon,
     Logout as LogoutIcon,
-    Speed as SpeedIcon,
     Menu as MenuIcon,
     MenuOpen as MenuOpenIcon,
     AutoAwesome as AiIcon
@@ -120,22 +119,22 @@ export default function Sidebar({ open, toggle }) {
             </IconButton>
 
             {/* Brand Logo Area */}
-            <Box sx={{ p: 2, pt: 1, display: 'flex', alignItems: 'center', gap: 1, justifyContent: open ? 'flex-start' : 'center' }}>
-                <SpeedIcon color="primary" sx={{ fontSize: 32, flexShrink: 0 }} />
-                <Typography
-                    variant="h6"
-                    component="div"
-                    sx={{
-                        fontWeight: 'bold',
-                        opacity: open ? 1 : 0,
-                        width: open ? 'auto' : 0,
-                        overflow: 'hidden',
-                        transition: 'opacity 0.2s ease, width 0.25s ease',
-                        whiteSpace: 'nowrap'
-                    }}
-                >
-                    NetMon
-                </Typography>
+            <Box sx={{ px: 2, pt: 1, pb: 1, display: 'flex', alignItems: 'center', justifyContent: open ? 'flex-start' : 'center', minHeight: 48 }}>
+                {open ? (
+                    <Box
+                        component="img"
+                        src="/lockup-white-1920.png"
+                        alt="NetAIQ"
+                        sx={{ height: 46, letterSpacing: '-0.02em' }}
+                    />
+                ) : (
+                    <Box
+                        component="img"
+                        src="/mark-color.svg"
+                        alt="NetAIQ"
+                        sx={{ width: 32, height: 32 }}
+                    />
+                )}
             </Box>
 
             <Divider sx={{ borderColor: 'rgba(255,255,255,0.08)', my: 1 }} />
@@ -155,8 +154,8 @@ export default function Sidebar({ open, toggle }) {
                                         px: 2.5,
                                         justifyContent: open ? 'initial' : 'center',
                                         '&.Mui-selected': {
-                                            backgroundColor: 'rgba(59, 130, 246, 0.15)',
-                                            borderLeft: open ? '3px solid #3b82f6' : 'none',
+                                            backgroundColor: 'rgba(0, 102, 255, 0.15)',
+                                            borderLeft: open ? '3px solid #0066FF' : 'none',
                                         }
                                     }}
                                 >

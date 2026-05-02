@@ -53,6 +53,7 @@ fastify.decorate('authenticate', async function (request, reply) {
 // default password set.  The mustChange flag is embedded in the JWT at login.
 fastify.addHook('preHandler', async (request, reply) => {
   if (!request.user?.mustChange) return;
+  if (request.url.startsWith('/api/v1/auth/')) return;
   if (request.url === '/api/v1/settings/password') return;
   reply.code(403).send({ error: true, message: 'Password change required before accessing other resources.' });
 });
