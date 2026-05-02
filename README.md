@@ -155,18 +155,21 @@ All settings are managed from the **Settings** page in the UI after logging in.
 2. Toggle **Enable Telegram Notifications** on.
 3. Paste your **Bot Token** and **Chat ID**.
 4. Click **Test Notification** to verify.
-5. Optionally enable **AI-Enhanced Alerts** to append AI-generated remediation steps to each notification. Requires a valid API key in AI Settings.
-6. Click **Save Settings**.
+5. Under **Alert Event Selection**, choose which event types trigger a notification. All events are enabled by default — uncheck any you want to suppress.
+6. Optionally enable **AI-Enhanced Alerts** to append AI-generated remediation steps to each notification. Requires a valid API key in AI Settings.
+7. Click **Save Settings**.
 
-### 4. Alert Types
+### 4. Supported Events
 
-| Event | Trigger | Severity |
-|---|---|---|
-| **Critical Device Offline** | A critical device fails ping checks | 🔴 Critical |
-| **Critical Device Restored** | A critical device comes back online | 🟢 Recovery |
-| **Access Point Offline** | A UniFi AP goes offline | 🔴 Critical |
-| **Access Point Restored** | A UniFi AP comes back online | 🟢 Recovery |
-| **Segment Unreachable** | A segment scan returns 0 devices | 🔴 Critical |
+Each event type is individually toggleable. All are enabled by default.
+
+| Category | Event | Trigger | Severity |
+|---|---|---|---|
+| **Device** | Critical Device Offline | A critical device fails ping checks | 🔴 Critical |
+| **Device** | Critical Device Restored | A critical device comes back online | 🟢 Recovery |
+| **Access Point** | Access Point Offline | A UniFi AP goes offline | 🔴 Critical |
+| **Access Point** | Access Point Restored | A UniFi AP comes back online | 🟢 Recovery |
+| **Segment** | Segment Unreachable | A segment scan returns 0 devices | 🔴 Critical |
 
 > [!NOTE]
 > Alerts fire only on **status changes**, not every scan cycle. Telegram failures are non-blocking and will never delay or crash the monitoring system.
@@ -316,35 +319,6 @@ netmon-dashboard/
 ├── docker-compose.yml
 └── .env.example
 ```
-
----
-
-## 🛠️ Troubleshooting
-
-### `SqliteError: attempt to write a readonly database`
-The `data/` directory or `netmon.db` has restricted permissions. Fix with:
-
-```bash
-sudo chown -R $USER:$USER data/
-```
-
-### Dashboard shows "Unauthorized" or Socket Errors
-Ensure `JWT_SECRET` in `.env` is a long, random string. If you changed it while the app was running, clear your browser cookies and log in again.
-
-### UniFi Integration Issues
-- **Connection failed**: Verify the Controller URL uses `https://` and credentials are correct. Use the **Test Connection** button in Settings.
-- **Data not appearing**: Check logs with `docker compose logs -f netmon` for specific API errors.
-
-### AI Insights Issues
-- **502 Bad Gateway**: Rebuild containers with `docker compose up -d --build netmon`.
-- **"AI Provider Not Configured"**: Ensure both the feature toggle is on and a valid API key is saved in Settings.
-- **No models in dropdown**: Check your internet connection and API key status. Use the **Refresh Models** button.
-
-### Telegram Notification Issues
-- **Test message fails**: Verify the bot token format (`123456789:ABCdef...`) and that the chat ID is numeric (negative for groups).
-- **No notifications received**: Ensure you sent `/start` to the bot first — Telegram bots cannot initiate conversations.
-- **"Telegram alerts are disabled"**: Navigate to Settings > Telegram and confirm the toggle is on and saved.
-- **AI steps missing from alerts**: Ensure "AI-Enhanced Alerts" is on and a valid API key is configured in AI Settings. If the provider exceeds 10s response time, NetMon sends the base alert without enhancement.
 
 ---
 
