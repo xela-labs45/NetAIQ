@@ -68,6 +68,28 @@ export default function LiveDevicesModal({ open, onClose, defaultTab = 'all' }) 
         device_type: 'workstation', segment_id: '', is_critical: false, notes: 'Added from Live Devices'
     });
 
+    // ── Render-time sync: derive connectionFilter/mainTab from props immediately ──
+    // Using state to track the last synced (open, defaultTab) pair. When they change,
+    // we update the filter synchronously during render — before useInfiniteDevices runs —
+    // preventing the one-stale-render race that caused the wrong devices to flash on open.
+    const [syncKey, setSyncKey] = useState(`${open}-${defaultTab}`);
+    const currentSyncKey = `${open}-${defaultTab}`;
+    if (syncKey !== currentSyncKey) {
+        setSyncKey(currentSyncKey);
+        if (open) {
+            if (defaultTab === 'discovered_wired') {
+                setMainTab('discovered');
+                setConnectionFilter('wired');
+            } else if (defaultTab === 'discovered_wireless') {
+                setMainTab('discovered');
+                setConnectionFilter('wireless');
+            } else {
+                setMainTab('online');
+                setConnectionFilter(defaultTab || 'all');
+            }
+        }
+    }
+
     const handleOpenSingleAdd = (device) => {
         setAddFormData({
             hostname: device.suggested_name || device.hostname || '',
@@ -100,22 +122,6 @@ export default function LiveDevicesModal({ open, onClose, defaultTab = 'all' }) 
         enabled: open && mainTab === 'discovered',
         staleTime: 5 * 60 * 1000
     });
-
-    // Handle deep linking from Dashboard cards where defaultTab controls both mainTab and connectionFilter
-    useEffect(() => {
-        if (open) {
-            if (defaultTab === 'discovered_wired') {
-                setMainTab('discovered');
-                setConnectionFilter('wired');
-            } else if (defaultTab === 'discovered_wireless') {
-                setMainTab('discovered');
-                setConnectionFilter('wireless');
-            } else {
-                setMainTab('online');
-                setConnectionFilter(defaultTab);
-            }
-        }
-    }, [open, defaultTab]);
 
     useEffect(() => {
         setSortBy('is_registered');
