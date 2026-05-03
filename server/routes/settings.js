@@ -131,7 +131,26 @@ module.exports = async function (fastify, opts) {
 
     fastify.post('/test-unifi', async (request, reply) => {
         try {
-            await authenticate();
+            const body = request.body || {};
+            const dbRows = db.prepare("SELECT key, value FROM settings WHERE key LIKE 'unifi_%'").all();
+            const db_s = dbRows.reduce((a, r) => { a[r.key] = r.value; return a; }, {});
+
+            const testSettings = {
+                unifi_url: body.unifi_url || db_s.unifi_url || null,
+                unifi_username: body.unifi_username || db_s.unifi_username || null,
+                unifi_password: (body.unifi_password && !body.unifi_password.startsWith('••••••••'))
+                    ? body.unifi_password : (db_s.unifi_password || null),
+                unifi_site: body.unifi_site || db_s.unifi_site || 'default',
+                unifi_ssl_verify: body.unifi_ssl_verify !== undefined ? body.unifi_ssl_verify : db_s.unifi_ssl_verify,
+            };
+
+            if (!testSettings.unifi_url) return reply.code(400).send({ error: true, message: 'Controller URL is required' });
+            if (!testSettings.unifi_username) return reply.code(400).send({ error: true, message: 'Username is required' });
+            if (!testSettings.unifi_password) return reply.code(400).send({ error: true, message: 'Password is required' });
+
+            const ok = await authenticate(testSettings);
+            if (!ok) return reply.code(400).send({ error: true, message: 'Authentication failed — check your credentials' });
+
             reply.send({ success: true, message: 'Connected successfully' });
         } catch (err) {
             reply.code(400).send({ error: true, message: err.message });
@@ -139,11 +158,26 @@ module.exports = async function (fastify, opts) {
     });
 
     fastify.post('/test-email', async (request, reply) => {
+        const body = request.body || {};
+        const dbRows = db.prepare("SELECT key, value FROM settings WHERE key LIKE 'smtp_%' OR key IN ('alert_from','alert_to')").all();
+        const db_s = dbRows.reduce((a, r) => { a[r.key] = r.value; return a; }, {});
+
+        const smtpOverride = {
+            smtp_host: body.smtp_host || db_s.smtp_host,
+            smtp_port: body.smtp_port || db_s.smtp_port || '587',
+            smtp_secure: body.smtp_secure !== undefined ? (body.smtp_secure ? '1' : '0') : db_s.smtp_secure,
+            smtp_user: body.smtp_user || db_s.smtp_user,
+            smtp_pass: (body.smtp_pass && body.smtp_pass !== '••••••••')
+                ? body.smtp_pass : db_s.smtp_pass,
+            alert_from: body.alert_from || db_s.alert_from,
+            alert_to: body.alert_to || db_s.alert_to,
+        };
+
         const result = await sendEmailAlert({
             severity: 'info',
             alert_type: 'test_email',
             message: 'This is a test email sent from the NetAIQ settings page.'
-        });
+        }, smtpOverride);
 
         if (result) {
             reply.send({ success: true, message: 'Test email sent successfully' });
@@ -176,7 +210,19 @@ module.exports = async function (fastify, opts) {
 
     fastify.post('/telegram/test', async (request, reply) => {
         try {
-            const result = await telegramService.sendTestMessage();
+            const body = request.body || {};
+            const dbSettings = telegramService.getSettings();
+
+            const token = (body.telegram_bot_token && !body.telegram_bot_token.startsWith('••••••••'))
+                ? body.telegram_bot_token
+                : dbSettings.telegram_bot_token;
+            const chatId = body.telegram_chat_id || dbSettings.telegram_chat_id;
+
+            if (!token || !chatId) {
+                return reply.code(400).send({ error: true, message: 'Bot token and chat ID are required to send a test message' });
+            }
+
+            const result = await telegramService.sendTestMessageDirect(token, chatId);
             if (result.ok) {
                 reply.send({ success: true, message: 'Test notification sent successfully!' });
             } else {

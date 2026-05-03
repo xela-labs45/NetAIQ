@@ -1,9 +1,21 @@
 const db = require('../db/database');
 const { z } = require('zod');
+const { Netmask } = require('netmask');
 const { pingDevice } = require('../services/pingService');
 const { mergeOnlineDevices, getOnlineCount } = require('../services/mergeService');
 const { lookupMac } = require('../services/macOuiService');
 const { toSqliteTimestamp, safeError } = require('../utils/dateFormatter');
+
+function detectSegmentForIp(ip) {
+    const segments = db.prepare('SELECT id, name, cidr FROM segments').all();
+    for (const seg of segments) {
+        try {
+            const block = new Netmask(seg.cidr);
+            if (block.contains(ip)) return seg;
+        } catch (_) { /* skip malformed CIDRs */ }
+    }
+    return null;
+}
 
 function normaliseMac(mac) {
     if (!mac) return null;
@@ -17,7 +29,10 @@ const deviceSchema = z.object({
     ip_address: z.string().ip({ version: 'v4', message: 'Invalid IPv4 address' }),
     mac_address: z.string().regex(/^([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})$/, 'Invalid MAC address format').optional().nullable().or(z.literal('')),
     device_type: z.string().optional().default('workstation'),
-    segment_id: z.number().optional().nullable(),
+    segment_id: z.preprocess(
+        v => (v === '' || v === null || v === undefined) ? null : Number(v),
+        z.number().nullable().optional()
+    ),
     is_critical: z.union([z.boolean(), z.number()]).optional().default(0),
     notes: z.string().optional().nullable()
 });
@@ -163,7 +178,13 @@ module.exports = async function (fastify, opts) {
             });
         }
 
-        const { hostname, ip_address, mac_address, device_type, segment_id, is_critical, notes } = validation.data;
+        let { hostname, ip_address, mac_address, device_type, segment_id, is_critical, notes } = validation.data;
+
+        let autoDetectedSegment = null;
+        if (!segment_id) {
+            autoDetectedSegment = detectSegmentForIp(ip_address);
+            if (autoDetectedSegment) segment_id = autoDetectedSegment.id;
+        }
 
         try {
             const normalizedMac = normaliseMac(mac_address);
@@ -180,7 +201,12 @@ module.exports = async function (fastify, opts) {
             // Initial ping asynchronously
             pingDevice(newDevice, fastify).catch(e => fastify.log.error(e));
 
-            reply.send({ device: newDevice });
+            reply.send({
+                device: newDevice,
+                autoDetectedSegment: autoDetectedSegment
+                    ? { id: autoDetectedSegment.id, name: autoDetectedSegment.name, cidr: autoDetectedSegment.cidr }
+                    : null
+            });
         } catch (err) {
             if (err.code === 'SQLITE_CONSTRAINT_UNIQUE') {
                 reply.code(400).send({ error: true, message: 'IP address already exists.' });
@@ -200,19 +226,30 @@ module.exports = async function (fastify, opts) {
             });
         }
 
-        const { hostname, ip_address, mac_address, device_type, segment_id, is_critical, notes } = validation.data;
+        let { hostname, ip_address, mac_address, device_type, segment_id, is_critical, notes } = validation.data;
+
+        let autoDetectedSegment = null;
+        if (!segment_id) {
+            autoDetectedSegment = detectSegmentForIp(ip_address);
+            if (autoDetectedSegment) segment_id = autoDetectedSegment.id;
+        }
 
         try {
             const normalizedMac = normaliseMac(mac_address);
             const vendor = request.body.vendor || (normalizedMac ? lookupMac(normalizedMac)?.manufacturer : null);
             db.prepare(`
-        UPDATE devices 
+        UPDATE devices
         SET hostname = ?, ip_address = ?, mac_address = ?, vendor = ?, device_type = ?, segment_id = ?, is_critical = ?, notes = ?
         WHERE id = ?
       `).run(hostname || null, ip_address, normalizedMac || null, vendor, device_type, segment_id || null, is_critical ? 1 : 0, notes || null, id);
 
             const device = db.prepare('SELECT * FROM devices WHERE id = ?').get(id);
-            reply.send({ device });
+            reply.send({
+                device,
+                autoDetectedSegment: autoDetectedSegment
+                    ? { id: autoDetectedSegment.id, name: autoDetectedSegment.name, cidr: autoDetectedSegment.cidr }
+                    : null
+            });
         } catch (err) {
             if (err.code === 'SQLITE_CONSTRAINT_UNIQUE') {
                 reply.code(400).send({ error: true, message: 'IP address already exists.' });

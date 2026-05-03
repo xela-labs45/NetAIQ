@@ -31,8 +31,8 @@ function getSettings() {
     };
 }
 
-async function authenticate() {
-    const settings = getSettings();
+async function authenticate(overrideSettings = null) {
+    const settings = overrideSettings || getSettings();
     const { unifi_url, unifi_username, unifi_password, unifi_ssl_verify } = settings;
 
     if (!unifi_url || !unifi_username || !unifi_password) {

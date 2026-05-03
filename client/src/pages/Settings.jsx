@@ -244,7 +244,7 @@ export default function Settings() {
     });
 
     const testUnifi = useMutation({
-        mutationFn: () => axios.post('/api/v1/settings/test-unifi'),
+        mutationFn: () => axios.post('/api/v1/settings/test-unifi', unifi),
         onMutate: () => setUnifiStatus('testing'),
         onSuccess: (res) => {
             setUnifiStatus('connected');
@@ -257,13 +257,16 @@ export default function Settings() {
     });
 
     const testEmail = useMutation({
-        mutationFn: () => axios.post('/api/v1/settings/test-email'),
+        mutationFn: () => axios.post('/api/v1/settings/test-email', email),
         onSuccess: (res) => showToast(res.data.message),
         onError: (err) => showToast(err.response?.data?.message || 'Failed to send test email', 'error')
     });
 
     const testTelegram = useMutation({
-        mutationFn: () => axios.post('/api/v1/settings/telegram/test'),
+        mutationFn: () => axios.post('/api/v1/settings/telegram/test', {
+            telegram_bot_token: telegram.telegram_bot_token,
+            telegram_chat_id: telegram.telegram_chat_id,
+        }),
         onMutate: () => setTelegramStatus('testing'),
         onSuccess: (res) => {
             setTelegramStatus('connected');
@@ -430,7 +433,9 @@ export default function Settings() {
                         <Grid container spacing={3}>
                             <Grid item xs={12}>
                                 <TextField
-                                    fullWidth label="Controller URL (e.g. https://192.168.1.6)"
+                                    fullWidth label="Controller URL"
+                                    placeholder="https://192.168.1.6:8443"
+                                    helperText="Include the port — UDM uses 443, legacy USG/CloudKey use 8443, some controllers use 11443"
                                     value={unifi.unifi_url}
                                     onChange={(e) => setUnifi({ ...unifi, unifi_url: e.target.value })}
                                 />
@@ -1071,8 +1076,8 @@ export default function Settings() {
                     <Box sx={{ p: 4, maxWidth: 600 }}>
                         <Typography variant="h6" gutterBottom>Admin Account</Typography>
                         <Box sx={{ mb: 4, p: 2, bgcolor: 'rgba(255,255,255,0.03)', borderRadius: 1 }}>
-                            <Typography variant="body2" color="text.secondary">Current User Email</Typography>
-                            <Typography variant="body1">{user?.email}</Typography>
+                            <Typography variant="body2" color="text.secondary">Username</Typography>
+                            <Typography variant="body1">{user?.username}</Typography>
                         </Box>
 
                         <Typography variant="h6" gutterBottom>Change Password</Typography>

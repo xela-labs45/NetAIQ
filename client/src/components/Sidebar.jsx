@@ -196,7 +196,7 @@ export default function Sidebar({ open, toggle }) {
                         transition: 'opacity 0.15s ease'
                     }}
                 >
-                    {user?.email}
+                    {user?.username}
                 </Typography>
                 <List disablePadding>
                     <ListItem disablePadding sx={{ display: 'block' }}>

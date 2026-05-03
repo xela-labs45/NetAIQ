@@ -2,7 +2,7 @@ import React, { useState, useMemo } from 'react';
 import {
   Box, Typography, Button, Dialog, DialogTitle, DialogContent,
   DialogActions, TextField, MenuItem, FormControlLabel, Switch, Chip,
-  IconButton, Tooltip, Drawer, Grid, Paper, Tabs, Tab
+  IconButton, Tooltip, Drawer, Grid, Paper, Tabs, Tab, Snackbar, Alert
 } from '@mui/material';
 import { DataGrid } from '@mui/x-data-grid';
 import {
@@ -29,6 +29,8 @@ export default function Devices() {
     hostname: '', ip_address: '', mac_address: '', device_type: 'other',
     segment_id: '', is_critical: false, notes: ''
   });
+  const [toast, setToast] = useState({ open: false, message: '', severity: 'info' });
+  const showToast = (message, severity = 'success') => setToast({ open: true, message, severity });
 
   const { data: devicesData, isLoading } = useQuery({
     queryKey: ['devices'],
@@ -64,18 +66,30 @@ export default function Devices() {
 
   const addMutation = useMutation({
     mutationFn: (newDevice) => axios.post('/api/v1/devices', newDevice),
-    onSuccess: () => {
+    onSuccess: (res) => {
       queryClient.invalidateQueries(['devices']);
+      if (res.data.autoDetectedSegment) {
+        showToast(`Device added — automatically placed in segment "${res.data.autoDetectedSegment.name}" (${res.data.autoDetectedSegment.cidr})`, 'info');
+      } else {
+        showToast('Device added successfully');
+      }
       handleClose();
-    }
+    },
+    onError: (err) => showToast(err.response?.data?.message || 'Failed to add device', 'error')
   });
 
   const updateMutation = useMutation({
     mutationFn: ({ id, data }) => axios.put(`/api/v1/devices/${id}`, data),
-    onSuccess: () => {
+    onSuccess: (res) => {
       queryClient.invalidateQueries(['devices']);
+      if (res.data.autoDetectedSegment) {
+        showToast(`Device updated — automatically placed in segment "${res.data.autoDetectedSegment.name}" (${res.data.autoDetectedSegment.cidr})`, 'info');
+      } else {
+        showToast('Device updated successfully');
+      }
       handleClose();
-    }
+    },
+    onError: (err) => showToast(err.response?.data?.message || 'Failed to update device', 'error')
   });
 
   const deleteMutation = useMutation({
@@ -381,8 +395,9 @@ export default function Devices() {
           <TextField
             select fullWidth label="Segment (Optional)" margin="dense"
             value={formData.segment_id} onChange={e => setFormData({ ...formData, segment_id: e.target.value })}
+            helperText="Leave blank to auto-detect from IP. External IPs (e.g. 8.8.8.8) will be saved without a segment."
           >
-            <MenuItem value=""><em>None</em></MenuItem>
+            <MenuItem value=""><em>Auto-detect from IP</em></MenuItem>
             {segments.map(s => <MenuItem key={s.id} value={s.id}>{s.name} ({s.cidr})</MenuItem>)}
           </TextField>
           <TextField
@@ -400,6 +415,17 @@ export default function Devices() {
           <Button variant="contained" onClick={handleSave} disabled={!formData.ip_address}>Save</Button>
         </DialogActions>
       </Dialog>
+
+      <Snackbar
+        open={toast.open}
+        autoHideDuration={5000}
+        onClose={() => setToast(prev => ({ ...prev, open: false }))}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+      >
+        <Alert severity={toast.severity} sx={{ width: '100%' }}>
+          {toast.message}
+        </Alert>
+      </Snackbar>
 
       {/* Device Detail Drawer */}
       <Drawer

@@ -10,8 +10,8 @@ function getSettings() {
     }, {});
 }
 
-async function sendEmailAlert(alert) {
-    const settings = getSettings();
+async function sendEmailAlert(alert, smtpOverride = null) {
+    const settings = smtpOverride || getSettings();
     const { smtp_host, smtp_port, smtp_secure, smtp_user, smtp_pass, alert_from, alert_to } = settings;
 
     if (!smtp_host || !alert_to) {

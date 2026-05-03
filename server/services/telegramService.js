@@ -323,11 +323,38 @@ async function sendTestMessage() {
     return sendMessage(message);
 }
 
+/**
+ * Send a test notification using explicit credentials, bypassing the DB and enabled check.
+ * Used by the settings test button so users can test without saving first.
+ */
+async function sendTestMessageDirect(token, chatId) {
+    const message = [
+        `✅ <b>NetAIQ Test Notification</b>`,
+        ``,
+        `Your Telegram alerts are configured correctly.`,
+        `<b>Time:</b> ${formatTimestamp()}`
+    ].join('\n');
+
+    const url = `https://api.telegram.org/bot${token}/sendMessage`;
+    try {
+        const response = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ chat_id: chatId, text: message, parse_mode: 'HTML' }),
+            signal: AbortSignal.timeout(10000)
+        });
+        return await response.json();
+    } catch (err) {
+        return { ok: false, description: err.message };
+    }
+}
+
 module.exports = {
     getSettings,
     isEnabled,
     sendMessage,
     sendTestMessage,
+    sendTestMessageDirect,
     sendCriticalDeviceOffline,
     sendCriticalDeviceOnline,
     sendApOffline,
