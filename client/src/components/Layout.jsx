@@ -13,7 +13,7 @@ export default function Layout() {
 
     const [sidebarOpen, setSidebarOpen] = useState(() => {
         const saved = localStorage.getItem('sidebar_open');
-        return saved !== null ? saved === 'true' : true;
+        return saved !== null ? saved === 'true' : false;
     });
 
     const toggleSidebar = () => {

@@ -41,14 +41,11 @@ export default function Sidebar({ open, toggle }) {
     useEffect(() => {
         if (socket) {
             const handleCount = (data) => setUnreadCount(data.unread_count);
-            const handleNew = () => setUnreadCount(prev => prev + 1);
 
             socket.on('alert:count', handleCount);
-            socket.on('alert:new', handleNew);
 
             return () => {
                 socket.off('alert:count', handleCount);
-                socket.off('alert:new', handleNew);
             };
         }
     }, [socket]);
