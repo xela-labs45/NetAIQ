@@ -81,9 +81,11 @@ module.exports = async function (fastify, opts) {
     });
 
     fastify.get('/', async (request, reply) => {
-        // Get all devices with their latest status and segment details
+        // Get all devices with their latest status and segment details.
+        // is_wired is resolved from discovered_devices (updated by UniFi sync):
+        // prefer MAC match, fall back to IP match.
         const devices = db.prepare(`
-      SELECT d.*, 
+      SELECT d.*,
              s.name as segment_name, s.color as segment_color,
              ai.manufacturer as ai_manufacturer,
              ai.device_type_suggestion as ai_device_type,
@@ -93,13 +95,18 @@ module.exports = async function (fastify, opts) {
              ai.suggested_name as ai_suggested_name,
              (SELECT status FROM ping_history ph WHERE ph.device_id = d.id ORDER BY timestamp DESC LIMIT 1) as status,
              (SELECT latency_ms FROM ping_history ph WHERE ph.device_id = d.id ORDER BY timestamp DESC LIMIT 1) as latency_ms,
-             (SELECT timestamp FROM ping_history ph WHERE ph.device_id = d.id ORDER BY timestamp DESC LIMIT 1) as last_seen
+             (SELECT timestamp FROM ping_history ph WHERE ph.device_id = d.id ORDER BY timestamp DESC LIMIT 1) as last_seen,
+             COALESCE(
+               (SELECT dd.is_wired FROM discovered_devices dd
+                WHERE d.mac_address IS NOT NULL AND d.mac_address != ''
+                  AND lower(dd.mac_address) = lower(d.mac_address) LIMIT 1),
+               (SELECT dd.is_wired FROM discovered_devices dd
+                WHERE dd.last_ip = d.ip_address LIMIT 1)
+             ) as is_wired
       FROM devices d
-
       LEFT JOIN segments s ON d.segment_id = s.id
       LEFT JOIN ai_device_identifications ai ON d.id = ai.device_id
     `).all();
-
 
         reply.send({ devices });
     });
