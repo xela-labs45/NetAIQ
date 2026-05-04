@@ -27,5 +27,8 @@ npm-debug.log*
 .kilo/
 .claude/
 
+# Generated OUI database (rebuild with: npm run update-oui)
+server/data/oui-ieee.json
+
 # Bug Files
 BUG_AUDIT.md

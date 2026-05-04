@@ -524,21 +524,21 @@ async function identifyDiscoveredDevice(mac) {
 
   if (!discovered) return null;
 
-  // OUI lookup first
+  // OUI lookup first — use local result for high or medium confidence (no AI call needed)
   const ouiResult = lookupMac(cleanMac);
-  if (ouiResult && ouiResult.confidence === 'high') {
+  if (ouiResult && (ouiResult.confidence === 'high' || ouiResult.confidence === 'medium')) {
     const result = {
       device_type_suggestion: ouiResult.device_type,
       manufacturer: ouiResult.manufacturer,
       os_guess: ouiResult.os_guess,
       owner_type: 'unknown',
-      confidence: 'high',
-      reasoning: `Identified via MAC OUI prefix. Manufacturer: ${ouiResult.manufacturer}.` + (ouiResult.note ? ` ${ouiResult.note}` : ''),
-      suggested_name: discovered.hostname || `${ouiResult.manufacturer} - Device`,
-      provider: 'oui_lookup',
+      confidence: ouiResult.confidence,
+      reasoning: `Identified via MAC OUI prefix (${ouiResult.source}). Manufacturer: ${ouiResult.manufacturer}.` + (ouiResult.note ? ` ${ouiResult.note}` : ''),
+      suggested_name: discovered.hostname || `${ouiResult.manufacturer} Device`,
+      provider: ouiResult.source === 'oui_ieee' ? 'oui_ieee' : 'oui_lookup',
       model: 'mac_oui'
     };
-    saveIdentification(null, cleanMac, result, null, 'oui_lookup', 'mac_oui');
+    saveIdentification(null, cleanMac, result, null, result.provider, 'mac_oui');
     return result;
   }
 
