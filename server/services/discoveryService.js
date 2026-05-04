@@ -372,19 +372,21 @@ function upsertDevice(device) {
 
 function saveOuiIdentification(mac, oui, hostname) {
     try {
+        const provider = oui.source === 'oui_ieee' ? 'oui_ieee' : 'oui_lookup';
         db.prepare('DELETE FROM ai_device_identifications WHERE mac_address = ? AND device_id IS NULL').run(mac);
         db.prepare(`
             INSERT INTO ai_device_identifications
                 (mac_address, device_type_suggestion, manufacturer, os_guess, owner_type, confidence, reasoning, suggested_name, provider, model)
-            VALUES (?, ?, ?, ?, 'unknown', ?, ?, ?, 'oui_lookup', 'mac_oui')
+            VALUES (?, ?, ?, ?, 'unknown', ?, ?, ?, ?, 'mac_oui')
         `).run(
             mac,
             oui.device_type || null,
             oui.manufacturer,
             oui.os_guess || null,
             oui.confidence,
-            `Identified via MAC OUI prefix. Manufacturer: ${oui.manufacturer}.${oui.note ? ' ' + oui.note : ''}`,
-            hostname || `${oui.manufacturer} Device`
+            `Identified via MAC OUI prefix (${provider}). Manufacturer: ${oui.manufacturer}.${oui.note ? ' ' + oui.note : ''}`,
+            hostname || `${oui.manufacturer} Device`,
+            provider
         );
         db.prepare('UPDATE discovered_devices SET ai_identified = 1 WHERE mac_address = ?').run(mac);
     } catch (e) {

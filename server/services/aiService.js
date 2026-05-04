@@ -384,22 +384,23 @@ async function identifyDevice(deviceId) {
 
   if (!device) return null;
 
-  // Step 1 — OUI lookup (free, instant)
+  // Step 1 — OUI lookup (free, instant). Use high or medium — no AI call needed.
   const ouiResult = lookupMac(device.mac_address);
-  if (ouiResult && ouiResult.confidence === 'high') {
+  if (ouiResult && (ouiResult.confidence === 'high' || ouiResult.confidence === 'medium')) {
+    const provider = ouiResult.source === 'oui_ieee' ? 'oui_ieee' : 'oui_lookup';
     const result = {
       device_type_suggestion: ouiResult.device_type,
       manufacturer: ouiResult.manufacturer,
       os_guess: ouiResult.os_guess,
       owner_type: 'unknown',
-      confidence: 'high',
-      reasoning: `Identified via MAC OUI prefix.Manufacturer: ${ouiResult.manufacturer}.` +
+      confidence: ouiResult.confidence,
+      reasoning: `Identified via MAC OUI prefix (${ouiResult.source}). Manufacturer: ${ouiResult.manufacturer}.` +
         (ouiResult.note ? ` ${ouiResult.note}` : ''),
-      suggested_name: device.hostname || `${ouiResult.manufacturer} - Device`,
-      provider: 'oui_lookup',
+      suggested_name: device.hostname || `${ouiResult.manufacturer} Device`,
+      provider,
       model: 'mac_oui'
     };
-    saveIdentification(deviceId, device.mac_address, result, null, 'oui_lookup', 'mac_oui');
+    saveIdentification(deviceId, device.mac_address, result, null, provider, 'mac_oui');
     return result;
   }
 
