@@ -55,16 +55,24 @@ module.exports = async function (fastify, opts) {
         }
 
         const total = devices.length;
-        
-        // Paginate slice
+
         const pageNum = parseInt(page, 10);
         const limitNum = parseInt(limit, 10);
+
+        // limit=0 means return all devices without pagination
+        if (limitNum === 0) {
+            return reply.send({
+                devices,
+                pagination: { page: 1, limit: 0, total, hasMore: false }
+            });
+        }
+
         const startIndex = (pageNum - 1) * limitNum;
         const endIndex = pageNum * limitNum;
-        
+
         const paginatedDevices = devices.slice(startIndex, endIndex);
 
-        reply.send({ 
+        reply.send({
             devices: paginatedDevices,
             pagination: {
                 page: pageNum,

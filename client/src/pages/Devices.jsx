@@ -43,10 +43,10 @@ export default function Devices() {
     queryFn: () => axios.get('/api/v1/segments').then(res => res.data)
   });
 
-  // Merged online devices for cross-referencing status
+  // Merged online devices for cross-referencing status — fetch all (limit=0) so every device gets is_wired
   const { data: onlineData } = useQuery({
     queryKey: ['devices', 'online'],
-    queryFn: () => axios.get('/api/v1/devices/online').then(res => res.data),
+    queryFn: () => axios.get('/api/v1/devices/online?limit=0').then(res => res.data),
     refetchInterval: 10000
   });
 
