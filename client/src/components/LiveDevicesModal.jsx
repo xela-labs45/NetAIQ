@@ -169,7 +169,7 @@ export default function LiveDevicesModal({ open, onClose, defaultTab = 'all' }) 
         return () => observer.disconnect();
     }, [mainTab, onlineHasMore, discoveredHasMore, loadMoreOnline, loadMoreDiscovered]);
 
-    // Socket listeners for batch AI progress
+    // Socket listeners for batch AI progress and auto OUI identification
     useEffect(() => {
         if (socket && open) {
             const handleIdentifyProgress = (data) => setAiProgress(data);
@@ -178,11 +178,16 @@ export default function LiveDevicesModal({ open, onClose, defaultTab = 'all' }) 
                 refetchDiscovered();
                 queryClient.invalidateQueries(['devices']);
             };
+            const handleOuiIdentified = () => {
+                refetchDiscovered();
+            };
             socket.on('discovery:identify_progress', handleIdentifyProgress);
             socket.on('discovery:identify_complete', handleIdentifyComplete);
+            socket.on('discovery:oui_identified', handleOuiIdentified);
             return () => {
                 socket.off('discovery:identify_progress', handleIdentifyProgress);
                 socket.off('discovery:identify_complete', handleIdentifyComplete);
+                socket.off('discovery:oui_identified', handleOuiIdentified);
             };
         }
     }, [socket, open, refetchDiscovered, queryClient]);
@@ -566,7 +571,7 @@ export default function LiveDevicesModal({ open, onClose, defaultTab = 'all' }) 
                                                     <Chip size="small" {...sourceChipProps(d.source)} sx={{ height: 20, fontSize: '0.7rem' }} />
                                                 </TableCell>
                                                 <TableCell>
-                                                    {d.ai_identified === 1 ? (
+                                                    {d.ai_identified ? (
                                                         <Tooltip title={d.reasoning} placement="top" arrow>
                                                             <Box>
                                                                 <Chip size="small" icon={<AutoAwesomeIcon sx={{ fontSize: '12px !important' }} />} label={`${d.confidence} conf`} color={aiChipColor} variant="outlined" sx={{ height: 20, fontSize: '0.7rem', fontWeight: 'bold' }} />
