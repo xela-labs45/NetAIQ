@@ -25,6 +25,7 @@ npm-debug.log*
 .vscode/
 .idea/
 .kilo/
+.claude/
 
 # Bug Files
 BUG_AUDIT.md
