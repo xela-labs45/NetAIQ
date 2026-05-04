@@ -31,6 +31,20 @@
 
 ---
 
+## 📸 Screenshots
+
+<div align="center">
+
+### Dashboard
+![NetAIQ Dashboard — live device status, segment health, critical devices, and recent alerts](assets/dashboard_sample.png)
+
+### AI Insights
+![NetAIQ AI Insights — network health summary, alert triage, and unknown device identification](assets/insights_sample.png)
+
+</div>
+
+---
+
 ## 🗂️ Tech Stack
 
 | Layer | Technology |
