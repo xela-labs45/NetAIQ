@@ -28,7 +28,12 @@ module.exports = async function (fastify, opts) {
         // Mask passwords and API keys
         if (settings.unifi_password) settings.unifi_password = '••••••••';
         if (settings.smtp_pass) settings.smtp_pass = '••••••••';
-        if (settings.ai_claude_key) settings.ai_claude_key = `sk-ant-${'*'.repeat(8)}`;
+        if (settings.ai_claude_key) {
+            settings.ai_claude_key = `sk-ant-${'*'.repeat(8)}`;
+            // Surface under the new field name the UI reads (ai_anthropic_key);
+            // ai_claude_key is the legacy storage column.
+            settings.ai_anthropic_key = settings.ai_claude_key;
+        }
         if (settings.ai_openrouter_key) settings.ai_openrouter_key = `sk-or-${'*'.repeat(8)}`;
         if (settings.telegram_bot_token) {
             const token = settings.telegram_bot_token;
