@@ -223,28 +223,10 @@ module.exports = async function (fastify, opts) {
                         });
                     }
 
-                    // Ensure device exists in devices table for AI identification
-                    const exists = db.prepare('SELECT id FROM devices WHERE mac_address = ?').get(device.mac_address);
-                    if (!exists) {
-                        if (device.last_ip) {
-                            try {
-                                db.prepare(`
-                                    INSERT INTO devices (hostname, ip_address, mac_address, device_type, is_critical)
-                                    VALUES (?, ?, ?, 'other', 0)
-                                `).run(device.hostname || null, device.last_ip, device.mac_address);
-                            } catch (e) {
-                                if (fastify.io) {
-                                    fastify.io.emit('discovery:ip_collision', {
-                                        mac: device.mac_address,
-                                        ip: device.last_ip,
-                                        error: e.message
-                                    });
-                                }
-                                fastify.log.warn(`IP collision for ${device.mac_address}: ${e.message}`);
-                            }
-                        }
-                    }
-
+                    // identifyDiscoveredDevice operates directly on discovered_devices —
+                    // do NOT auto-promote into the devices table. The devices table is the
+                    // user's manual registry and must only be populated via explicit add
+                    // (POST /devices, POST /devices/bulk).
                     await identifyDiscoveredDevice(device.mac_address);
                     count++;
 
