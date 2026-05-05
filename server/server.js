@@ -150,6 +150,26 @@ const start = async () => {
     const { startCleanupJobs } = require('./jobs/cleanupJob');
     startCleanupJobs();
 
+    // Ensure the IEEE OUI database exists; auto-fetch if missing (gitignored file).
+    (async () => {
+      const fs = require('fs');
+      const ouiDbPath = require('path').join(__dirname, 'data/oui-ieee.json');
+      if (!fs.existsSync(ouiDbPath)) {
+        fastify.log.warn('[OUI] IEEE database missing — auto-fetching (this takes ~10 s)…');
+        try {
+          const { execSync } = require('child_process');
+          execSync('node ' + require('path').join(__dirname, 'scripts/update-oui-db.js'), { stdio: 'inherit' });
+          const { reloadIeeeMap } = require('./services/macOuiService');
+          reloadIeeeMap();
+          const { ouiIdentifyUnprocessed } = require('./services/discoveryService');
+          ouiIdentifyUnprocessed();
+          fastify.log.info('[OUI] IEEE database ready.');
+        } catch (e) {
+          fastify.log.error(`[OUI] Auto-fetch failed: ${e.message} — run: npm run update-oui`);
+        }
+      }
+    })();
+
     // Run one-time OUI backfill for existing devices
     const { backfillVendors } = require('./services/backfillService');
     backfillVendors(fastify).catch(err => fastify.log.error(`Backfill failed: ${err.message}`));

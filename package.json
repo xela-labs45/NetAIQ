@@ -10,7 +10,8 @@
     "build": "cd client && npm install && npm run build",
     "start": "node server/db/seed.js && node server/server.js",
     "seed": "node server/db/seed.js",
-    "update-oui": "node server/scripts/update-oui-db.js"
+    "update-oui": "node server/scripts/update-oui-db.js",
+    "postinstall": "node -e \"if(!require('fs').existsSync('server/data/oui-ieee.json')){require('child_process').execSync('npm run update-oui',{stdio:'inherit'})}else{console.log('[OUI] IEEE database already present.')}\""
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.80.0",

@@ -16,7 +16,7 @@
 const db = require('../db/database');
 const unifiService = require('./unifiService');
 const settingsService = require('./settingsService');
-const { lookupMac, isRandomisedMac } = require('./macOuiService');
+const { lookupMac, isRandomisedMac, normaliseMac } = require('./macOuiService');
 const { Netmask } = require('netmask');
 const os = require('os');
 const { exec } = require('child_process');
@@ -52,13 +52,6 @@ function isArpScanRunning() {
 }
 
 // ─── MAC Helpers ────────────────────────────────────────────────────
-
-function normaliseMac(mac) {
-    if (!mac) return null;
-    const clean = mac.replace(/[^a-fA-F0-9]/g, '');
-    if (clean.length !== 12) return null;
-    return clean.toLowerCase().match(/.{2}/g).join(':');
-}
 
 function isIgnoredMac(mac) {
     if (!mac) return true;
@@ -303,7 +296,7 @@ function upsertDevice(device) {
     }
 
     const existing = db.prepare(
-        'SELECT id, last_ip, hostname FROM discovered_devices WHERE mac_address = ?'
+        'SELECT id, last_ip, hostname, ai_identified FROM discovered_devices WHERE mac_address = ?'
     ).get(mac);
 
     if (existing) {
@@ -315,6 +308,8 @@ function upsertDevice(device) {
             console.log(`[Discovery] MAC ${mac} changed IP: ${oldIp} -> ${newIp} (Source: ${device.source})`);
         }
 
+        const ouiUpdate = lookupMac(mac);
+        const vendorUpdate = (ouiUpdate && !ouiUpdate.isRandomised) ? ouiUpdate.manufacturer : null;
         db.prepare(`
             UPDATE discovered_devices SET
                 last_ip    = COALESCE(?, last_ip),
@@ -331,13 +326,19 @@ function upsertDevice(device) {
             device.is_wired ?? null,
             device.source,
             device.segment_id || null,
-            lookupMac(mac)?.manufacturer || null,
+            vendorUpdate || null,
             mac
         );
         macTrackingStats.updated++;
+        // If this device was never OUI-identified (e.g. first seen before IEEE DB existed),
+        // try now that we may have a richer database available.
+        if (!existing.ai_identified && ouiUpdate && !ouiUpdate.isRandomised) {
+            saveOuiIdentification(mac, ouiUpdate, device.hostname || existing.hostname);
+        }
         return { action: 'updated', mac, id: existing.id };
     } else {
         const oui = lookupMac(mac);
+        const vendor = (oui && !oui.isRandomised) ? oui.manufacturer : null;
         try {
             const result = db.prepare(`
                 INSERT INTO discovered_devices
@@ -350,11 +351,11 @@ function upsertDevice(device) {
                 device.is_wired ?? null,
                 device.source,
                 device.segment_id || null,
-                oui?.manufacturer || null
+                vendor || null
             );
             macTrackingStats.inserted++;
-            console.log(`[Discovery] New device: ${mac} (IP: ${device.ip}, Vendor: ${oui?.manufacturer || 'Unknown'}, Source: ${device.source})`);
-            if (oui) {
+            console.log(`[Discovery] New device: ${mac} (IP: ${device.ip}, Vendor: ${vendor || 'Unknown'}, Source: ${device.source})`);
+            if (oui && !oui.isRandomised) {
                 saveOuiIdentification(mac, oui, device.hostname);
             }
             return { action: 'inserted', mac, id: result.lastInsertRowid };
@@ -373,22 +374,29 @@ function upsertDevice(device) {
 function saveOuiIdentification(mac, oui, hostname) {
     try {
         const provider = oui.source === 'oui_ieee' ? 'oui_ieee' : 'oui_lookup';
-        db.prepare('DELETE FROM ai_device_identifications WHERE mac_address = ? AND device_id IS NULL').run(mac);
-        db.prepare(`
-            INSERT INTO ai_device_identifications
-                (mac_address, device_type_suggestion, manufacturer, os_guess, owner_type, confidence, reasoning, suggested_name, provider, model)
-            VALUES (?, ?, ?, ?, 'unknown', ?, ?, ?, ?, 'mac_oui')
-        `).run(
-            mac,
-            oui.device_type || null,
-            oui.manufacturer,
-            oui.os_guess || null,
-            oui.confidence,
-            `Identified via MAC OUI prefix (${provider}). Manufacturer: ${oui.manufacturer}.${oui.note ? ' ' + oui.note : ''}`,
-            hostname || `${oui.manufacturer} Device`,
-            provider
-        );
-        db.prepare('UPDATE discovered_devices SET ai_identified = 1 WHERE mac_address = ?').run(mac);
+        const displayName = oui.manufacturer
+            ? (hostname || `${oui.manufacturer} Device`)
+            : (hostname || 'Unknown Device');
+        db.transaction(() => {
+            db.prepare('DELETE FROM ai_device_identifications WHERE mac_address = ? AND device_id IS NULL').run(mac);
+            db.prepare(`
+                INSERT INTO ai_device_identifications
+                    (mac_address, device_type_suggestion, manufacturer, os_guess, owner_type, confidence, reasoning, suggested_name, provider, model)
+                VALUES (?, ?, ?, ?, 'unknown', ?, ?, ?, ?, 'mac_oui')
+            `).run(
+                mac,
+                oui.device_type || null,
+                oui.manufacturer || null,
+                oui.os_guess || null,
+                oui.confidence,
+                `Identified via MAC OUI prefix (${provider}).` +
+                    (oui.manufacturer ? ` Manufacturer: ${oui.manufacturer}.` : '') +
+                    (oui.note ? ` ${oui.note}` : ''),
+                displayName,
+                provider
+            );
+            db.prepare('UPDATE discovered_devices SET ai_identified = 1 WHERE mac_address = ?').run(mac);
+        })();
     } catch (e) {
         console.error(`[Discovery] OUI identification save failed for ${mac}:`, e.message);
     }
@@ -409,7 +417,7 @@ function ouiIdentifyUnprocessed() {
         const cleanMac = normaliseMac(device.mac_address);
         if (!cleanMac) continue;
         const oui = lookupMac(cleanMac);
-        if (!oui) continue;
+        if (!oui || oui.isRandomised) continue;
         saveOuiIdentification(cleanMac, oui, device.hostname);
         processed++;
     }

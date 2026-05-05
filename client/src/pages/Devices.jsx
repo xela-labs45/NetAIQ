@@ -271,15 +271,25 @@ export default function Devices() {
     {
       field: 'device_type',
       headerName: 'Type',
-      width: 150,
+      width: 220,
       renderCell: (params) => {
         const typeObj = DEVICE_TYPES.find(t => t.value === params.row.device_type);
         const label = typeObj ? typeObj.label : params.row.device_type;
         const Icon = getDeviceTypeIcon(params.row.device_type);
+        const mfr = params.row.ai_manufacturer;
         return (
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-            <Icon fontSize="small" sx={{ color: 'text.secondary' }} />
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75, flexWrap: 'wrap' }}>
+            <Icon fontSize="small" sx={{ color: 'text.secondary', flexShrink: 0 }} />
             <Typography variant="body2">{label}</Typography>
+            {mfr && !mfr.startsWith('Unknown') && (
+              <Chip
+                size="small"
+                label={mfr}
+                color="primary"
+                variant="outlined"
+                sx={{ height: 18, fontSize: '0.6rem', fontWeight: 600 }}
+              />
+            )}
           </Box>
         );
       }

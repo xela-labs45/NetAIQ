@@ -1,5 +1,5 @@
 const { Anthropic } = require('@anthropic-ai/sdk');
-const { lookupMac } = require('./macOuiService');
+const { lookupMac, normaliseMac } = require('./macOuiService');
 const db = require('../db/database');
 const settingsService = require('./settingsService');
 
@@ -384,9 +384,10 @@ async function identifyDevice(deviceId) {
 
   if (!device) return null;
 
-  // Step 1 — OUI lookup (free, instant). Use high or medium — no AI call needed.
+  // Step 1 — OUI lookup (free, instant).
+  // Short-circuit for high/medium confidence AND for randomised MACs (AI cannot help).
   const ouiResult = lookupMac(device.mac_address);
-  if (ouiResult && (ouiResult.confidence === 'high' || ouiResult.confidence === 'medium')) {
+  if (ouiResult && (ouiResult.confidence === 'high' || ouiResult.confidence === 'medium' || ouiResult.isRandomised)) {
     const provider = ouiResult.source === 'oui_ieee' ? 'oui_ieee' : 'oui_lookup';
     const result = {
       device_type_suggestion: ouiResult.device_type,
@@ -466,13 +467,6 @@ Return this exact JSON:
   return parsed;
 }
 
-function normaliseMac(mac) {
-  if (!mac) return null;
-  const clean = mac.replace(/[^a-fA-F0-9]/g, '');
-  if (clean.length !== 12) return null;
-  return clean.toLowerCase().match(/.{2}/g).join(':');
-}
-
 function saveIdentification(deviceId, mac, result, raw, provider, model) {
   const transaction = db.transaction(() => {
     if (deviceId !== null) {
@@ -525,9 +519,9 @@ async function identifyDiscoveredDevice(mac) {
 
   if (!discovered) return null;
 
-  // OUI lookup first — use local result for high or medium confidence (no AI call needed)
+  // OUI lookup first — short-circuit for high/medium confidence AND randomised MACs.
   const ouiResult = lookupMac(cleanMac);
-  if (ouiResult && (ouiResult.confidence === 'high' || ouiResult.confidence === 'medium')) {
+  if (ouiResult && (ouiResult.confidence === 'high' || ouiResult.confidence === 'medium' || ouiResult.isRandomised)) {
     const result = {
       device_type_suggestion: ouiResult.device_type,
       manufacturer: ouiResult.manufacturer,

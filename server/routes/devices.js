@@ -3,7 +3,7 @@ const { z } = require('zod');
 const { Netmask } = require('netmask');
 const { pingDevice } = require('../services/pingService');
 const { mergeOnlineDevices, getOnlineCount } = require('../services/mergeService');
-const { lookupMac } = require('../services/macOuiService');
+const { lookupMac, normaliseMac } = require('../services/macOuiService');
 const { toSqliteTimestamp, safeError } = require('../utils/dateFormatter');
 
 function detectSegmentForIp(ip) {
@@ -15,13 +15,6 @@ function detectSegmentForIp(ip) {
         } catch (_) { /* skip malformed CIDRs */ }
     }
     return null;
-}
-
-function normaliseMac(mac) {
-    if (!mac) return null;
-    const clean = String(mac).replace(/[^a-fA-F0-9]/g, '');
-    if (clean.length !== 12) return mac; // fallback to original if parsing fails
-    return clean.toLowerCase().match(/.{2}/g).join(':');
 }
 
 const deviceSchema = z.object({

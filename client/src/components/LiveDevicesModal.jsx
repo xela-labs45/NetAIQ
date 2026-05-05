@@ -548,9 +548,24 @@ export default function LiveDevicesModal({ open, onClose, defaultTab = 'all' }) 
                                                     <Typography variant="body2" sx={{ fontWeight: 'bold' }}>
                                                         {d.suggested_name || d.hostname || 'Unknown Device'}
                                                     </Typography>
-                                                    <Box sx={{ display: 'flex', gap: 0.5, mt: 0.5 }}>
-                                                        <Chip size="small" label={d.manufacturer || d.vendor || 'Unknown Provider'} sx={{ height: 16, fontSize: '0.65rem' }} />
-                                                        {d.device_type_suggestion && <Chip size="small" label={d.device_type_suggestion} variant="outlined" sx={{ height: 16, fontSize: '0.65rem' }} />}
+                                                    <Box sx={{ display: 'flex', gap: 0.5, mt: 0.5, flexWrap: 'wrap', alignItems: 'center' }}>
+                                                        {d.manufacturer && !d.manufacturer.startsWith('Unknown') && (
+                                                            <Chip
+                                                                size="small"
+                                                                label={d.manufacturer}
+                                                                color="primary"
+                                                                variant="outlined"
+                                                                sx={{ height: 16, fontSize: '0.65rem', fontWeight: 600 }}
+                                                            />
+                                                        )}
+                                                        {d.device_type_suggestion && (
+                                                            <Chip
+                                                                size="small"
+                                                                label={DEVICE_TYPES.find(t => t.value === d.device_type_suggestion)?.label || d.device_type_suggestion}
+                                                                variant="outlined"
+                                                                sx={{ height: 16, fontSize: '0.65rem', color: 'text.secondary', borderColor: 'divider' }}
+                                                            />
+                                                        )}
                                                     </Box>
                                                 </TableCell>
                                                 <TableCell sx={{ fontFamily: 'monospace', fontSize: '0.85rem' }}>
