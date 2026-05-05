@@ -41,11 +41,24 @@ export default function Sidebar({ open, toggle }) {
     useEffect(() => {
         if (socket) {
             const handleCount = (data) => setUnreadCount(data.unread_count);
+            const refetchCount = () => {
+                axios.get('/api/v1/alerts/count').then(res => {
+                    setUnreadCount(res.data.unread_count);
+                }).catch(() => { });
+            };
 
             socket.on('alert:count', handleCount);
+            socket.on('connect', refetchCount);
+            socket.io.on('reconnect', refetchCount);
+
+            // If socket is already connected when this effect runs, resync now
+            // to close the gap between the mount-time REST fetch and subscription.
+            if (socket.connected) refetchCount();
 
             return () => {
                 socket.off('alert:count', handleCount);
+                socket.off('connect', refetchCount);
+                socket.io.off('reconnect', refetchCount);
             };
         }
     }, [socket]);
