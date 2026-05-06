@@ -1,32 +1,31 @@
 const bcrypt = require('bcrypt');
 const db = require('../db/database');
 
-// In-memory per-account lockout: Map<username, { count, lockedUntil }>
-const loginAttempts = new Map();
 const MAX_ATTEMPTS = 5;
 const LOCKOUT_MS = 15 * 60 * 1000; // 15 minutes
 
 function isAccountLocked(username) {
-    const entry = loginAttempts.get(username);
-    if (!entry) return false;
-    if (entry.lockedUntil && Date.now() < entry.lockedUntil) return true;
-    if (entry.lockedUntil && Date.now() >= entry.lockedUntil) {
-        loginAttempts.delete(username);
-    }
+    const user = db.prepare('SELECT locked_until FROM users WHERE username = ?').get(username);
+    if (!user?.locked_until) return false;
+    if (Date.now() < new Date(user.locked_until).getTime()) return true;
+    // Lock expired — clear it
+    db.prepare('UPDATE users SET failed_attempts = 0, locked_until = NULL WHERE username = ?').run(username);
     return false;
 }
 
 function recordFailedAttempt(username) {
-    const entry = loginAttempts.get(username) || { count: 0, lockedUntil: null };
-    entry.count += 1;
-    if (entry.count >= MAX_ATTEMPTS) {
-        entry.lockedUntil = Date.now() + LOCKOUT_MS;
-    }
-    loginAttempts.set(username, entry);
+    const user = db.prepare('SELECT failed_attempts FROM users WHERE username = ?').get(username);
+    if (!user) return;
+    const attempts = (user.failed_attempts || 0) + 1;
+    const lockedUntil = attempts >= MAX_ATTEMPTS
+        ? new Date(Date.now() + LOCKOUT_MS).toISOString()
+        : null;
+    db.prepare('UPDATE users SET failed_attempts = ?, locked_until = ? WHERE username = ?')
+        .run(attempts, lockedUntil, username);
 }
 
 function clearAttempts(username) {
-    loginAttempts.delete(username);
+    db.prepare('UPDATE users SET failed_attempts = 0, locked_until = NULL WHERE username = ?').run(username);
 }
 
 module.exports = async function (fastify, opts) {

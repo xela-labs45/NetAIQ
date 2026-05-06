@@ -50,6 +50,22 @@ if (tableCheck.count === 0) {
 // Reset potentially stale locks on startup
 db.prepare("DELETE FROM settings WHERE key = 'scan_running'").run();
 
+// Migration: add durable login-lockout columns to users
+try {
+    db.prepare("ALTER TABLE users ADD COLUMN failed_attempts INTEGER DEFAULT 0").run();
+} catch (err) {
+    if (!err.message.includes('duplicate column name')) {
+        console.warn('Database Migration Warning (failed_attempts column):', err.message);
+    }
+}
+try {
+    db.prepare("ALTER TABLE users ADD COLUMN locked_until TEXT DEFAULT NULL").run();
+} catch (err) {
+    if (!err.message.includes('duplicate column name')) {
+        console.warn('Database Migration Warning (locked_until column):', err.message);
+    }
+}
+
 // Migration: Split ping_interval_ms into segment_scan_interval and critical_ping_interval
 const legacyInterval = db.prepare("SELECT value FROM settings WHERE key = 'ping_interval_ms'").get();
 if (legacyInterval) {

@@ -17,6 +17,9 @@ if (missing.length > 0) {
 }
 
 // Register plugins
+// In production, CORS is disabled (origin: false) because Caddy serves both
+// frontend and API from the same origin. If deployed without a reverse proxy,
+// set CORS_ORIGIN env var or add an explicit allowed origin here.
 fastify.register(cors, {
   origin: process.env.NODE_ENV === 'production' ? false : ['http://localhost:5173', 'https://localhost:5173'],
   credentials: true
@@ -45,7 +48,7 @@ fastify.decorate('authenticate', async function (request, reply) {
   try {
     await request.jwtVerify();
   } catch (err) {
-    reply.send(err);
+    reply.code(401).send({ error: true, message: 'Unauthorized' });
   }
 });
 
@@ -148,17 +151,26 @@ const start = async () => {
     startAiJobs(fastify);
 
     const { startCleanupJobs } = require('./jobs/cleanupJob');
-    startCleanupJobs();
+    startCleanupJobs(fastify);
 
     // Ensure the IEEE OUI database exists; auto-fetch if missing (gitignored file).
+    // Uses spawn (non-blocking) so the event loop stays responsive during the ~10s fetch.
     (async () => {
       const fs = require('fs');
       const ouiDbPath = require('path').join(__dirname, 'data/oui-ieee.json');
       if (!fs.existsSync(ouiDbPath)) {
         fastify.log.warn('[OUI] IEEE database missing — auto-fetching (this takes ~10 s)…');
         try {
-          const { execSync } = require('child_process');
-          execSync('node ' + require('path').join(__dirname, 'scripts/update-oui-db.js'), { stdio: 'inherit' });
+          await new Promise((resolve, reject) => {
+            const { spawn } = require('child_process');
+            const child = spawn(
+              process.execPath,
+              [require('path').join(__dirname, 'scripts/update-oui-db.js')],
+              { stdio: 'inherit' }
+            );
+            child.on('close', code => code === 0 ? resolve() : reject(new Error(`exit code ${code}`)));
+            child.on('error', reject);
+          });
           const { reloadIeeeMap } = require('./services/macOuiService');
           reloadIeeeMap();
           const { ouiIdentifyUnprocessed } = require('./services/discoveryService');

@@ -10,24 +10,33 @@ function getSettings() {
     }, {});
 }
 
+// Cached transporter — rebuilt only when SMTP config changes.
+let _transporter = null;
+let _transporterKey = '';
+
+function getTransporter(host, port, secure, user, pass) {
+    const key = `${host}|${port}|${secure}|${user}|${pass}`;
+    if (_transporter && key === _transporterKey) return _transporter;
+    _transporter = nodemailer.createTransport({
+        host,
+        port: parseInt(port, 10),
+        secure: secure === '1',
+        auth: user ? { user, pass } : undefined
+    });
+    _transporterKey = key;
+    return _transporter;
+}
+
 async function sendEmailAlert(alert, smtpOverride = null) {
     const settings = smtpOverride || getSettings();
     const { smtp_host, smtp_port, smtp_secure, smtp_user, smtp_pass, alert_from, alert_to } = settings;
 
     if (!smtp_host || !alert_to) {
         console.warn('SMTP or alert recipient not configured in settings. Skipping email alert.');
-        return false; // Email not configured
+        return false;
     }
 
-    const transporter = nodemailer.createTransport({
-        host: smtp_host,
-        port: parseInt(smtp_port, 10),
-        secure: smtp_secure === '1', // true for 465, false for other ports
-        auth: smtp_user ? {
-            user: smtp_user,
-            pass: smtp_pass
-        } : undefined
-    });
+    const transporter = getTransporter(smtp_host, smtp_port, smtp_secure, smtp_user, smtp_pass);
 
     try {
         await transporter.sendMail({

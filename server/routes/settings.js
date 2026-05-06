@@ -238,7 +238,18 @@ module.exports = async function (fastify, opts) {
         }
     });
 
-    fastify.put('/password', async (request, reply) => {
+    fastify.put('/password', {
+        config: {
+            rateLimit: {
+                max: 5,
+                timeWindow: '15m',
+                errorResponse: () => ({
+                    error: true,
+                    message: 'Too many password change attempts, try again in 15 minutes'
+                })
+            }
+        }
+    }, async (request, reply) => {
         const { current_password, new_password, new_username } = request.body;
 
         if (!new_password || new_password.length < 12) {

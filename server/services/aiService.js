@@ -169,7 +169,7 @@ async function safeCallAI(systemPrompt, userPrompt, maxTokens) {
 }
 
 async function callClaude(systemPrompt, userPrompt, maxTokens, model) {
-  const apiKey = settingsService.get('ai_anthropic_key') || settingsService.get('ai_claude_key') || process.env.ANTHROPIC_API_KEY;
+  const apiKey = settingsService.get('ai_anthropic_key') || settingsService.get('ai_claude_key');
   if (!apiKey) return null;
 
   const resolvedModel = model || 'claude-3-5-sonnet-20241022';
