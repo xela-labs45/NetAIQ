@@ -9,6 +9,23 @@ function escapeHtml(str) {
         .replace(/>/g, '&gt;');
 }
 
+// Telegram bot tokens are always in the format  <bot_id>:<35-char alphanumeric key>
+const TELEGRAM_TOKEN_RE = /^\d+:[A-Za-z0-9_-]{30,}$/;
+// Chat IDs are either a numeric string (private/group) or an @username
+const TELEGRAM_CHAT_ID_RE = /^-?\d+$|^@[A-Za-z0-9_]{3,}$/;
+
+function validateBotToken(token) {
+    if (typeof token !== 'string' || !TELEGRAM_TOKEN_RE.test(token)) {
+        throw new Error('Invalid Telegram bot token format');
+    }
+}
+
+function validateChatId(chatId) {
+    if (typeof chatId !== 'string' || !TELEGRAM_CHAT_ID_RE.test(String(chatId).trim())) {
+        throw new Error('Invalid Telegram chat ID format');
+    }
+}
+
 // Lazy-load aiService to avoid circular dependency
 let _aiService = null;
 function getAiService() {
@@ -66,6 +83,14 @@ async function sendMessage(message) {
 
     if (!telegram_bot_token || !telegram_chat_id) {
         return { ok: false, description: 'Telegram bot token or chat ID not configured' };
+    }
+
+    try {
+        validateBotToken(telegram_bot_token);
+        validateChatId(telegram_chat_id);
+    } catch (err) {
+        console.error('Telegram: invalid credentials in settings:', err.message);
+        return { ok: false, description: err.message };
     }
 
     const url = `https://api.telegram.org/bot${telegram_bot_token}/sendMessage`;
@@ -158,7 +183,7 @@ async function sendCriticalDeviceOffline(device, segmentName) {
         `<b>IP:</b> ${escapeHtml(device.ip_address)}`,
         device.mac_address ? `<b>MAC:</b> ${escapeHtml(device.mac_address)}` : null,
         segmentName ? `<b>Segment:</b> ${escapeHtml(segmentName)}` : null,
-        device.last_seen ? `<b>Last Seen:</b> ${device.last_seen}` : null,
+        device.last_seen ? `<b>Last Seen:</b> ${escapeHtml(String(device.last_seen))}` : null,
         `<b>Time:</b> ${formatTimestamp()}`,
         ``,
         `⚠️ This device is marked as critical.`,
@@ -328,6 +353,13 @@ async function sendTestMessage() {
  * Used by the settings test button so users can test without saving first.
  */
 async function sendTestMessageDirect(token, chatId) {
+    try {
+        validateBotToken(token);
+        validateChatId(String(chatId).trim());
+    } catch (err) {
+        return { ok: false, description: err.message };
+    }
+
     const message = [
         `✅ <b>NetAIQ Test Notification</b>`,
         ``,
@@ -340,7 +372,7 @@ async function sendTestMessageDirect(token, chatId) {
         const response = await fetch(url, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ chat_id: chatId, text: message, parse_mode: 'HTML' }),
+            body: JSON.stringify({ chat_id: String(chatId).trim(), text: message, parse_mode: 'HTML' }),
             signal: AbortSignal.timeout(10000)
         });
         return await response.json();
