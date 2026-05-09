@@ -1,49 +1,99 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# NetAIQ stack
+#
+#   netaiq  → Node/Fastify app + SQLite, listens on :3001 inside the bridge
+#   caddy   → TLS-terminating reverse proxy, the only service exposed to host
+#
+# Both services run with `no-new-privileges` and on a private bridge so other
+# containers on the host can't reach the app or the Caddy admin endpoint.
+# ─────────────────────────────────────────────────────────────────────────────
+
 services:
   netaiq:
     build: .
-    # EXPOSE: Internal port for Caddy proxy. Keep this if using the internal Caddy service.
+    # Internal port reachable only by Caddy on the `netaiq_net` bridge.
+    # Use the `ports:` block below instead if you're terminating TLS yourself.
     expose:
       - "${PORT:-3001}"
 
-    # PORTS: Uncomment the section below ONLY if you want to bypass Caddy and access the app directly 
-    # (e.g., if you have your own Nginx/Traefik reverse proxy on the host).
+    # Uncomment ONLY if you want to bypass the bundled Caddy and expose the
+    # app directly to the host (e.g. behind your own Nginx/Traefik).
     # ports:
     #   - "3001:3001"
 
-    # NET_RAW and NET_ADMIN are required for ARP-based
-    # MAC discovery on the local L2 segment.
-    # These capabilities are safe — they only allow
-    # the container to send/receive raw network packets
-    # on the host network. Remove if not using MAC
-    # discovery on Linux hosts.
-    # NOTE: On Windows Docker Desktop (WSL2/Hyper-V), these capabilities
-    # are accepted without error but have no effect — ARP/MAC discovery
-    # will not function on Windows hosts regardless.
+    # NET_RAW / NET_ADMIN are required for nmap's ARP-based MAC discovery on
+    # the local L2 segment. The Dockerfile uses `setcap` so only the nmap
+    # binary inherits these capabilities — the Node process does not.
+    # On Windows Docker Desktop (WSL2/Hyper-V) these are accepted but inert;
+    # ARP discovery does not work there. Drop both if you don't need it.
     cap_add:
       - NET_RAW
       - NET_ADMIN
 
+    # Block privilege escalation via setuid binaries inside the container.
+    security_opt:
+      - no-new-privileges:true
+
     volumes:
-      - ./data:/app/data # persist SQLite DB
+      - ./data:/app/data # SQLite DB persistence
     env_file: .env
     restart: always
+    networks:
+      - netaiq_net
 
-  # CADDY: Provides automatic SSL/HTTPS. 
-  # Comment out or delete this entire section if you are managing SSL yourself.
+    healthcheck:
+      # The app serves the SPA at `/`, which returns 200 once Fastify is up.
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3001/').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+  # Caddy provides automatic HTTPS (Let's Encrypt for public domains,
+  # internal CA for localhost / private IPs). Comment this whole service out
+  # if you're terminating TLS at a different proxy.
   caddy:
-    image: caddy:latest
+    # Pinned to a specific minor version so rebuilds are reproducible. Bump
+    # deliberately after reviewing the Caddy changelog.
+    image: caddy:2.8-alpine
     restart: always
     ports:
       - "${HTTP_PORT:-3080}:80"
       - "${HTTPS_PORT:-3443}:443"
+      - "${HTTPS_PORT:-3443}:443/udp" # HTTP/3 (QUIC)
     environment:
       - SITE_ADDRESS=${SITE_ADDRESS:-localhost}
     volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile
+      # Caddyfile is read-only inside the container.
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      # caddy_data holds the issued certificates and ACME account key —
+      # treat it as sensitive. Back it up; do not commit it.
       - caddy_data:/data
       - caddy_config:/config
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      # Only capability needed to bind 80/443 as a non-root user inside the
+      # official Caddy image.
+      - NET_BIND_SERVICE
     depends_on:
-      - netaiq
+      netaiq:
+        condition: service_healthy
+    networks:
+      - netaiq_net
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:80"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+networks:
+  # Private bridge — isolates these services from other containers on the
+  # host's default bridge network.
+  netaiq_net:
+    driver: bridge
 
 volumes:
   caddy_data:

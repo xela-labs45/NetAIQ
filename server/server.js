@@ -1,4 +1,8 @@
-const fastify = require('fastify')({ logger: true });
+// trustProxy: honour X-Forwarded-* headers set by Caddy so request.ip and
+// the rate limiter see the real client address. Safe here because the app
+// is only reachable through the Caddy container on the private bridge —
+// do NOT enable this if the app is exposed directly to untrusted clients.
+const fastify = require('fastify')({ logger: true, trustProxy: true });
 const path = require('path');
 const cors = require('@fastify/cors');
 const fastifyStatic = require('@fastify/static');

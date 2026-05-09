@@ -1,67 +1,80 @@
-# Use Node.js 20 Alpine for smaller image size
+# ─────────────────────────────────────────────────────────────────────────────
+# NetAIQ production image
+#
+# Two stages:
+#   1. `build` — installs all deps (incl. dev) and builds the Vite frontend.
+#   2. final  — copies just the server + production deps into a minimal
+#               Alpine image that runs as the non-root `node` user.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# ----- Stage 1: build the frontend -------------------------------------------
 FROM node:20-alpine AS build
 
 WORKDIR /app
 
-# Copy root package.json
+# Backend deps. `npm ci` honours package-lock.json and fails on drift, which
+# `npm install` does not — important for reproducible builds.
 COPY package*.json ./
+RUN npm ci
 
-# Install backend dependencies
-RUN npm install
-
-# Copy client package.json and install frontend dependencies
+# Frontend deps.
 COPY client/package*.json ./client/
-RUN cd client && npm install
+RUN cd client && npm ci
 
-# Copy all source files
+# Copy sources and build. Vite is configured to emit into server/public.
 COPY . .
-
-# Build the frontend (outputs to client/dist, which we'll configure Vite to output directly to server/public or we copy it)
-# By default Vite outputs to dist, let's make it output to server/public
 RUN npm run build
 
-# Production image
+# ----- Stage 2: production runtime -------------------------------------------
 FROM node:20-alpine
 
-# Set environment
 ENV NODE_ENV=production
 ENV PORT=3001
 
-# Networking tools for MAC discovery
-# nmap:     ARP scan for L2 device discovery
-# iproute2: ip neigh fallback ARP cache reader
-# net-tools: arp -a legacy fallback
-# libcap:   setcap to grant nmap raw socket capability without root
+# Networking tools required for L2 device discovery:
+#   nmap     — ARP scan
+#   iproute2 — `ip neigh` fallback for the ARP cache
+#   net-tools — legacy `arp -a` fallback
+#   libcap   — `setcap` so non-root nmap can open raw sockets
+#   wget     — used by the docker-compose healthcheck
 RUN apk add --no-cache \
     nmap \
     iproute2 \
     net-tools \
-    libcap
+    libcap \
+    wget
 
-# Grant nmap the raw socket capabilities it needs so the
-# non-root 'node' user can perform ARP scans.
-# This avoids running the entire container as root.
+# Grant raw-socket capabilities to the nmap binary only. This avoids running
+# the whole container as root and means the Node process itself never holds
+# CAP_NET_RAW / CAP_NET_ADMIN — only nmap inherits them when invoked.
 RUN setcap cap_net_raw,cap_net_admin+eip /usr/bin/nmap
 
 WORKDIR /app
 
-# Ensure data directory exists and is owned by the node user (UID 1000)
+# Pre-create the data dir so the SQLite file owned by `node` (UID 1000)
+# survives a bind-mount from the host.
 RUN mkdir -p /app/data && chown -R node:node /app
 
-# Copy package.json and only install production dependencies.
-# better-sqlite3 has no musl prebuilt, so it must compile from source on Alpine.
-# Build tools are installed then pruned in a single layer to keep image size down.
+# Install production deps only. better-sqlite3 has no musl prebuilt and must
+# compile from source on Alpine — toolchain is added then removed in the
+# same RUN to keep the final image small.
 COPY --chown=node:node package*.json ./
-RUN apk add --no-cache python3 make g++ && \
-    npm install --omit=dev && \
-    apk del python3 make g++
+RUN apk add --no-cache --virtual .build-deps python3 make g++ && \
+    npm ci --omit=dev && \
+    npm cache clean --force && \
+    apk del .build-deps
 
-# Copy built files from the build stage
+# Bring in the built server (server/public is the bundled frontend).
 COPY --from=build --chown=node:node /app/server ./server
 
-# Switch to the standard non-root user (UID 1000)
+# Drop to UID 1000 — the rest of runtime never touches root.
 USER node
 
 EXPOSE 3001
+
+# Liveness probe used by Docker / orchestrators. Fastify returns 200 on `/`
+# once the server is accepting connections.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+    CMD wget -q --spider http://127.0.0.1:3001/ || exit 1
 
 CMD ["npm", "start"]

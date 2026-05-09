@@ -1,12 +1,76 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# NetAIQ Caddy reverse proxy
+#
+# Caddy auto-selects the certificate issuer:
+#   - Public domain in SITE_ADDRESS  → Let's Encrypt (ACME, public CA)
+#   - localhost / private IP literal → Caddy's internal CA (self-signed root)
+#
+# Do NOT set `tls internal` globally — it forces the self-signed CA even for
+# public domains and prevents Let's Encrypt issuance.
+# ─────────────────────────────────────────────────────────────────────────────
+
 {
-	# Force Caddy to use the IP certificate when the client doesn't send SNI
-	# (which happens when connecting via IP address)
+	# Default SNI for clients that connect by IP without an SNI header.
+	# Without this, Caddy serves its fallback cert and the browser warns
+	# that the cert doesn't match the host.
 	default_sni {$SITE_ADDRESS}
+
+	# Optional: contact address for ACME / Let's Encrypt expiry notices.
+	# email {$ACME_EMAIL}
 }
 
+# Reusable security-header snippet. Imported into each site block.
+(security_headers) {
+	header {
+		# Force HTTPS for one year. Safe because Caddy auto-redirects HTTP→HTTPS
+		# and we never serve this app over plain HTTP intentionally.
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+
+		# Block MIME sniffing — defends against content-type confusion attacks.
+		X-Content-Type-Options "nosniff"
+
+		# Disallow embedding the app in frames (clickjacking defense).
+		X-Frame-Options "DENY"
+
+		# Trim the Referer to origin-only on cross-origin navigations so
+		# internal URLs (which may contain device IDs) don't leak.
+		Referrer-Policy "strict-origin-when-cross-origin"
+
+		# Deny powerful browser features the app doesn't use.
+		Permissions-Policy "geolocation=(), microphone=(), camera=(), payment=()"
+
+		# Strip identifying headers from upstream responses.
+		-Server
+		-X-Powered-By
+	}
+}
+
+# Site block. {$SITE_ADDRESS} works for both public domains and IP literals.
+# The localhost / 127.0.0.1 aliases are kept so local-only deployments work
+# without setting SITE_ADDRESS.
 {$SITE_ADDRESS}, localhost, 127.0.0.1 {
-	# Caddy automatically uses internal SSL for these local addresses.
-	# For public domains, it will automatically use Let's Encrypt.
-	tls internal
-	reverse_proxy netaiq:3001
+	import security_headers
+
+	# gzip + zstd for text payloads (HTML, JS, CSS, JSON).
+	encode zstd gzip
+
+	# Cap request bodies. The app's largest legitimate POST is a settings
+	# blob well under 1 MB; 10 MB leaves headroom and stops trivial DoS.
+	request_body {
+		max_size 10MB
+	}
+
+	# Access log on stdout so `docker logs caddy` captures it.
+	log {
+		output stdout
+		format console
+	}
+
+	reverse_proxy netaiq:3001 {
+		# Forward the real client IP so the app's rate limiter and audit
+		# log see the originating address, not the Caddy container's IP.
+		header_up X-Real-IP {remote_host}
+		header_up X-Forwarded-For {remote_host}
+		header_up X-Forwarded-Proto {scheme}
+	}
 }

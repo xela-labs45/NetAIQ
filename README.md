@@ -95,16 +95,40 @@ HTTPS_PORT=3443
 
 ### 3. SSL Configuration (Caddy)
 
-NetAIQ uses **Caddy** as a reverse proxy for automatic SSL/HTTPS.
+NetAIQ ships with **Caddy** as a reverse proxy. Caddy automatically chooses the right certificate issuer based on `SITE_ADDRESS`:
 
-- **Local use**: Keep `SITE_ADDRESS=localhost` or set it to your server's LAN IP. Caddy issues a self-signed certificate.
-- **Public use**: Set `SITE_ADDRESS` to your domain. Ensure ports 80 and 443 point to your server for Let's Encrypt.
+| `SITE_ADDRESS` value | Issuer used | Browser trust |
+|---|---|---|
+| `localhost`, `127.0.0.1`, or a LAN IP (e.g. `192.168.1.10`) | Caddy internal CA (self-signed) | Untrusted by default — see note below |
+| Public domain (e.g. `netaiq.example.com`) | Let's Encrypt (ACME HTTP-01) | Trusted by all browsers |
+
+**Local / LAN deployments** — keep the defaults:
+
+```env
+SITE_ADDRESS=localhost   # or your LAN IP
+HTTP_PORT=3080
+HTTPS_PORT=3443
+```
+
+Visit `https://localhost:3443` (or `https://<LAN-IP>:3443`). Your browser will warn about the self-signed cert; either click through or install the Caddy Root CA from the `caddy_data` volume into your OS trust store (`/data/caddy/pki/authorities/local/root.crt` inside the container).
+
+**Public domain deployments** — Let's Encrypt requires Caddy to be reachable on the standard ports **80** and **443** from the public internet. The default `HTTP_PORT=3080`/`HTTPS_PORT=3443` will NOT work for ACME issuance. Either:
+
+1. Set the standard ports in `.env`:
+   ```env
+   SITE_ADDRESS=netaiq.example.com
+   HTTP_PORT=80
+   HTTPS_PORT=443
+   ```
+2. Or keep the high ports and forward `80 → 3080` / `443 → 3443` at your router/firewall.
+
+Make sure your domain's A/AAAA record points to the server **before** starting the stack — Caddy will retry, but failed issuance attempts are rate-limited by Let's Encrypt.
 
 > [!TIP]
-> To access the dashboard from another machine on your network, set `SITE_ADDRESS` to your server's LAN IP (e.g., `192.168.1.1`) and restart with `docker compose down && docker compose up -d`.
+> To access the dashboard from another machine on your LAN, set `SITE_ADDRESS` to your server's LAN IP (e.g., `192.168.1.10`) and restart with `docker compose down && docker compose up -d`.
 
 > [!TIP]
-> To use your own reverse proxy (Nginx, Traefik, etc.), disable the Caddy service in `docker-compose.yml` and uncomment the `ports` section for the `netaiq` service.
+> To use your own reverse proxy (Nginx, Traefik, etc.), comment out the entire `caddy:` service in `docker-compose.yml` and uncomment the `ports:` block on the `netaiq` service to expose `3001` directly. The app is configured with `trustProxy: true`, so it will honour `X-Forwarded-For` from your proxy.
 
 ### 4. Build and run
 
