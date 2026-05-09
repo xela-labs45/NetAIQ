@@ -1,0 +1,75 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# NetAIQ — Caddy HTTPS overlay
+#
+# Layer this on top of docker-compose.yml to add automatic SSL via Caddy:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.caddy.yml up -d
+#
+# Caddy automatically picks the right certificate issuer:
+#   - localhost or LAN IP  →  Caddy internal CA (self-signed, browser warning)
+#   - Public domain        →  Let's Encrypt (trusted by all browsers, free)
+#
+# Required .env variables (add these if using this overlay):
+#   SITE_ADDRESS=localhost       # or your LAN IP / public domain
+#   HTTP_PORT=3080               # host port mapped to Caddy's :80
+#   HTTPS_PORT=3443              # host port mapped to Caddy's :443
+#
+# For Let's Encrypt to work, HTTP_PORT must be 80 (or port 80 must be
+# forwarded to HTTP_PORT at your router) so ACME HTTP-01 challenge can reach
+# Caddy from the public internet.
+# ─────────────────────────────────────────────────────────────────────────────
+
+services:
+  netaiq:
+    # Remove the direct port binding from the base file — Caddy is the only
+    # entry point. The app remains reachable inside the private bridge.
+    ports: []
+    expose:
+      - "${PORT:-3001}"
+    networks:
+      - netaiq_net
+
+  caddy:
+    # Pinned minor version for reproducible builds. Bump deliberately after
+    # reviewing the Caddy changelog.
+    image: caddy:2.8-alpine
+    restart: always
+    ports:
+      - "${HTTP_PORT:-3080}:80"
+      - "${HTTPS_PORT:-3443}:443"
+      - "${HTTPS_PORT:-3443}:443/udp" # HTTP/3 (QUIC)
+    environment:
+      - SITE_ADDRESS=${SITE_ADDRESS:-localhost}
+    volumes:
+      # Read-only so Caddy can't modify its own config at runtime.
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      # caddy_data holds issued certs and the ACME account key — treat as
+      # sensitive. Back it up; never commit it.
+      - caddy_data:/data
+      - caddy_config:/config
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      # Required to bind ports 80 and 443 as a non-root user.
+      - NET_BIND_SERVICE
+    networks:
+      - netaiq_net
+    depends_on:
+      netaiq:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:80"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+networks:
+  # Private bridge — keeps the app unreachable except through Caddy.
+  netaiq_net:
+    driver: bridge
+
+volumes:
+  caddy_data:
+  caddy_config:

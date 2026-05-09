@@ -79,69 +79,27 @@ cd netaiq-dashboard
 cp .env.example .env
 ```
 
-Edit `.env` and set a strong `JWT_SECRET`. UniFi, email, and notification settings are configured through the Settings page after first login.
+Open `.env` and set a strong `JWT_SECRET` — everything else can stay as-is for a local setup. UniFi, email, Telegram, and AI settings are configured through the Settings page after first login.
 
 ```env
 PORT=3001
 NODE_ENV=production
-JWT_SECRET=your_strong_random_secret_here
+JWT_SECRET=your_strong_random_secret_here   # change this
 DB_PATH=./data/netaiq.db
-
-# SSL / Proxy Settings
-SITE_ADDRESS=localhost
-HTTP_PORT=3080
-HTTPS_PORT=3443
 ```
 
-### 3. SSL Configuration (Caddy)
-
-NetAIQ ships with **Caddy** as a reverse proxy. Caddy automatically chooses the right certificate issuer based on `SITE_ADDRESS`:
-
-| `SITE_ADDRESS` value | Issuer used | Browser trust |
-|---|---|---|
-| `localhost`, `127.0.0.1`, or a LAN IP (e.g. `192.168.1.10`) | Caddy internal CA (self-signed) | Untrusted by default — see note below |
-| Public domain (e.g. `netaiq.example.com`) | Let's Encrypt (ACME HTTP-01) | Trusted by all browsers |
-
-**Local / LAN deployments** — keep the defaults:
-
-```env
-SITE_ADDRESS=localhost   # or your LAN IP
-HTTP_PORT=3080
-HTTPS_PORT=3443
-```
-
-Visit `https://localhost:3443` (or `https://<LAN-IP>:3443`). Your browser will warn about the self-signed cert; either click through or install the Caddy Root CA from the `caddy_data` volume into your OS trust store (`/data/caddy/pki/authorities/local/root.crt` inside the container).
-
-**Public domain deployments** — Let's Encrypt requires Caddy to be reachable on the standard ports **80** and **443** from the public internet. The default `HTTP_PORT=3080`/`HTTPS_PORT=3443` will NOT work for ACME issuance. Either:
-
-1. Set the standard ports in `.env`:
-   ```env
-   SITE_ADDRESS=netaiq.example.com
-   HTTP_PORT=80
-   HTTPS_PORT=443
-   ```
-2. Or keep the high ports and forward `80 → 3080` / `443 → 3443` at your router/firewall.
-
-Make sure your domain's A/AAAA record points to the server **before** starting the stack — Caddy will retry, but failed issuance attempts are rate-limited by Let's Encrypt.
-
 > [!TIP]
-> To access the dashboard from another machine on your LAN, set `SITE_ADDRESS` to your server's LAN IP (e.g., `192.168.1.10`) and restart with `docker compose down && docker compose up -d`.
+> Generate a strong secret with: `openssl rand -hex 64`
 
-> [!TIP]
-> To use your own reverse proxy (Nginx, Traefik, etc.), comment out the entire `caddy:` service in `docker-compose.yml` and uncomment the `ports:` block on the `netaiq` service to expose `3001` directly. The app is configured with `trustProxy: true`, so it will honour `X-Forwarded-For` from your proxy.
-
-### 4. Build and run
+### 3. Build and run
 
 ```bash
 docker compose up -d --build
 ```
 
-### 5. Access the dashboard
+### 4. Access the dashboard
 
-Navigate to **[https://localhost:3443](https://localhost:3443)** (or your configured domain/port).
-
-> [!NOTE]
-> With local SSL, your browser will show a certificate warning. You can safely proceed or trust the Caddy Root CA.
+Navigate to **[http://localhost:3001](http://localhost:3001)** (or `http://<server-LAN-IP>:3001` from another machine).
 
 **Default credentials:**
 
@@ -152,6 +110,132 @@ Navigate to **[https://localhost:3443](https://localhost:3443)** (or your config
 
 > [!WARNING]
 > On first login you will be prompted to choose a unique username and set a new password before accessing the dashboard.
+
+---
+
+## 🔒 HTTPS Setup (Optional)
+
+The default stack runs over plain HTTP, which is fine for home lab and LAN use. If you need HTTPS — for public exposure, Let's Encrypt, or to avoid browser warnings — NetAIQ includes a **Caddy overlay** that handles SSL automatically.
+
+### Option A — LAN / local HTTPS (self-signed cert)
+
+Add these to your `.env`:
+
+```env
+SITE_ADDRESS=192.168.1.10   # your server's LAN IP
+HTTP_PORT=3080
+HTTPS_PORT=3443
+```
+
+Start with the Caddy overlay:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.caddy.yml up -d --build
+```
+
+Access at `https://192.168.1.10:3443`. Your browser will show a certificate warning because the cert is self-signed by Caddy's internal CA.
+
+To remove the warning, install the Caddy root CA on each client machine:
+
+<details>
+<summary><strong>Linux</strong></summary>
+
+```bash
+# Extract the cert from the running Caddy container
+docker compose -f docker-compose.yml -f docker-compose.caddy.yml exec caddy \
+  cat /data/caddy/pki/authorities/local/root.crt > caddy-root.crt
+
+# Trust it system-wide
+sudo cp caddy-root.crt /usr/local/share/ca-certificates/caddy-root.crt
+sudo update-ca-certificates
+
+# Trust it in Chrome / Chromium (requires libnss3-tools)
+certutil -d sql:$HOME/.pki/nssdb -A -t "CT,," -n "Caddy Local CA" -i caddy-root.crt
+```
+
+Restart Chrome completely after importing.
+</details>
+
+<details>
+<summary><strong>Windows</strong></summary>
+
+```bash
+# On the Linux host — extract the cert
+docker compose -f docker-compose.yml -f docker-compose.caddy.yml exec caddy \
+  cat /data/caddy/pki/authorities/local/root.crt > caddy-root.crt
+```
+
+Copy `caddy-root.crt` to the Windows machine, rename it to `caddy-root.cer`, then either:
+
+- Double-click → **Install Certificate** → **Local Machine** → **Trusted Root Certification Authorities**
+
+Or via PowerShell (Admin):
+
+```powershell
+Import-Certificate -FilePath "C:\path\to\caddy-root.cer" -CertStoreLocation Cert:\LocalMachine\Root
+```
+
+Chrome and Edge pick this up immediately. Firefox users must also import via **Settings → Privacy & Security → View Certificates → Authorities → Import**.
+</details>
+
+<details>
+<summary><strong>macOS</strong></summary>
+
+```bash
+# On the Linux host — extract the cert
+docker compose -f docker-compose.yml -f docker-compose.caddy.yml exec caddy \
+  cat /data/caddy/pki/authorities/local/root.crt > caddy-root.crt
+```
+
+Copy `caddy-root.crt` to the Mac, then:
+
+```bash
+sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain caddy-root.crt
+```
+
+Or double-click the file → open in Keychain Access → set **Trust → When using this certificate** to **Always Trust**.
+</details>
+
+---
+
+### Option B — Public domain with Let's Encrypt (trusted cert, no warnings)
+
+Let's Encrypt issues a free, browser-trusted cert for any public domain. Caddy handles renewal automatically.
+
+**Requirements:**
+- A domain with an A/AAAA record pointing to your server
+- Port **80** reachable from the public internet (for the ACME HTTP-01 challenge)
+
+Add these to your `.env`:
+
+```env
+SITE_ADDRESS=netaiq.example.com   # your domain
+HTTP_PORT=80
+HTTPS_PORT=443
+```
+
+Start the stack:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.caddy.yml up -d --build
+```
+
+Access at `https://netaiq.example.com` — no certificate warnings, no client-side setup.
+
+> [!IMPORTANT]
+> Make sure your domain's DNS record is live and port 80 is open **before** starting the stack. Let's Encrypt rate-limits failed issuance attempts.
+
+---
+
+### Option C — Bring your own reverse proxy
+
+If you already run Nginx, Traefik, or another proxy, skip Caddy entirely. Use just the base compose file and expose the app port:
+
+```bash
+docker compose up -d --build
+```
+
+Proxy traffic to `http://<server-ip>:3001`. The app is configured with `trustProxy: true`, so it will correctly read `X-Forwarded-For` and `X-Forwarded-Proto` headers from your proxy.
 
 ---
 
