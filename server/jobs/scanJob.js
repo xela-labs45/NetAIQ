@@ -7,7 +7,14 @@ const criticalPingJob = require('./criticalPingJob'); // to check if it's execut
 let currentTimer = null;
 let isRunning = false;
 let nextRunTime = null;
-let previousSegmentZeros = new Set();
+// Map<segmentId, { since: number, telegramNotifiedAt: number|null, emailNotifiedAt: number|null }>
+let segmentZeroTracker = new Map();
+
+function getGraceMs(channel) {
+    const key = channel === 'email' ? 'email_offline_grace_minutes' : 'telegram_offline_grace_minutes';
+    const row = db.prepare('SELECT value FROM settings WHERE key = ?').get(key);
+    return Math.max(0, parseInt(row?.value || '0', 10)) * 60 * 1000;
+}
 
 function getInterval() {
     const setting = db.prepare('SELECT value FROM settings WHERE key = ?').get('segment_scan_interval');
@@ -53,22 +60,46 @@ async function runScanCycle(fastify) {
                     const hostsUp = results.filter(r => r.status === 'up').length;
 
                     if (hostsUp === 0 && expectedDevices > 0) {
-                        if (!previousSegmentZeros.has(seg.id)) {
-                            fastify.log.warn(`Segment ${seg.id} offline (expected ${expectedDevices}, found 0). Sending alerts.`);
-                            const segment = db.prepare('SELECT name, cidr FROM segments WHERE id = ?').get(seg.id);
-                            telegramService.sendSegmentOffline(segment, expectedDevices, hostsUp);
-                            const segEmailPref = db.prepare("SELECT value FROM settings WHERE key = 'email_alert_segment_offline'").get();
-                            if (segEmailPref?.value === '1') {
-                                alertService.sendEmailAlert({
-                                    alert_type: 'segment_offline',
-                                    message: `Network segment "${segment.name}" (${segment.cidr}) is unreachable. Expected ${expectedDevices} devices, found 0.`,
-                                    severity: 'critical'
-                                });
+                        const now = Date.now();
+                        const segment = db.prepare('SELECT name, cidr FROM segments WHERE id = ?').get(seg.id);
+
+                        if (!segmentZeroTracker.has(seg.id)) {
+                            // First time seeing this segment at zero — start grace period
+                            segmentZeroTracker.set(seg.id, {
+                                since: now,
+                                telegramNotifiedAt: null,
+                                emailNotifiedAt: null
+                            });
+                        }
+
+                        const state = segmentZeroTracker.get(seg.id);
+
+                        if (state.telegramNotifiedAt === null) {
+                            const tgGraceMs = getGraceMs('telegram');
+                            if (now - state.since >= tgGraceMs) {
+                                state.telegramNotifiedAt = now;
+                                fastify.log.warn(`Segment ${seg.id} offline (expected ${expectedDevices}, found 0). Sending Telegram alert.`);
+                                telegramService.sendSegmentOffline(segment, expectedDevices, hostsUp);
                             }
-                            previousSegmentZeros.add(seg.id);
+                        }
+
+                        if (state.emailNotifiedAt === null) {
+                            const emailGraceMs = getGraceMs('email');
+                            if (now - state.since >= emailGraceMs) {
+                                state.emailNotifiedAt = now;
+                                const segEmailPref = db.prepare("SELECT value FROM settings WHERE key = 'email_alert_segment_offline'").get();
+                                if (segEmailPref?.value === '1') {
+                                    fastify.log.warn(`Segment ${seg.id} offline. Sending email alert.`);
+                                    alertService.sendEmailAlert({
+                                        alert_type: 'segment_offline',
+                                        message: `Network segment "${segment.name}" (${segment.cidr}) is unreachable. Expected ${expectedDevices} devices, found 0.`,
+                                        severity: 'critical'
+                                    });
+                                }
+                            }
                         }
                     } else if (hostsUp > 0) {
-                        previousSegmentZeros.delete(seg.id);
+                        segmentZeroTracker.delete(seg.id);
                     }
                 } catch (tgErr) {
                     fastify.log.error(`Segment ${seg.id} Telegram check error (non-blocking): ${tgErr.message}`);

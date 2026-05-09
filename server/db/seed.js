@@ -45,7 +45,9 @@ async function seed() {
             ['unifi_interval_ms', '300000'],
             ['alert_cooldown_ms', '900000'],
             ['telegram_alerts_enabled', '0'],
-            ['telegram_ai_enhanced', '0']
+            ['telegram_ai_enhanced', '0'],
+            ['email_offline_grace_minutes', '0'],
+            ['telegram_offline_grace_minutes', '0']
         ];
 
         const insertSetting = db.prepare('INSERT INTO settings (key, value) VALUES (?, ?)');

@@ -60,6 +60,7 @@ export default function Settings() {
         alert_on_critical_offline: true, alert_on_critical_online: true, alert_on_high_latency: false,
         email_alert_ap_offline: false, email_alert_ap_online: false,
         email_alert_segment_offline: false,
+        email_offline_grace_minutes: '0',
     });
 
     const [telegram, setTelegram] = useState({
@@ -67,6 +68,7 @@ export default function Settings() {
         telegram_alert_critical_offline: true, telegram_alert_critical_online: true,
         telegram_alert_ap_offline: true, telegram_alert_ap_online: true,
         telegram_alert_segment_offline: true,
+        telegram_offline_grace_minutes: '0',
     });
 
     const [general, setGeneral] = useState({
@@ -152,6 +154,7 @@ export default function Settings() {
             email_alert_ap_offline: s.email_alert_ap_offline === '1',
             email_alert_ap_online: s.email_alert_ap_online === '1',
             email_alert_segment_offline: s.email_alert_segment_offline === '1',
+            email_offline_grace_minutes: s.email_offline_grace_minutes || '0',
         });
 
         setTelegram({
@@ -164,6 +167,7 @@ export default function Settings() {
             telegram_alert_ap_offline: s.telegram_alert_ap_offline !== '0',
             telegram_alert_ap_online: s.telegram_alert_ap_online !== '0',
             telegram_alert_segment_offline: s.telegram_alert_segment_offline !== '0',
+            telegram_offline_grace_minutes: s.telegram_offline_grace_minutes || '0',
         });
 
         setPolling({
@@ -581,6 +585,21 @@ export default function Settings() {
                             <FormControlLabel control={<Checkbox checked={email.email_alert_segment_offline} onChange={(e) => setEmail({ ...email, email_alert_segment_offline: e.target.checked })} />} label="Segment scan returns no devices" />
                         </Box>
 
+                        <Typography variant="h6" gutterBottom>Notification Timing</Typography>
+                        <Grid container spacing={3} sx={{ mb: 4 }}>
+                            <Grid item xs={12} sm={6}>
+                                <TextField
+                                    fullWidth
+                                    type="number"
+                                    label="Offline Grace Period (minutes)"
+                                    value={email.email_offline_grace_minutes}
+                                    onChange={(e) => setEmail({ ...email, email_offline_grace_minutes: e.target.value })}
+                                    inputProps={{ min: 0, step: 1 }}
+                                    helperText="Wait this many minutes before sending an email. If the device recovers within this window, no alert is sent. Set to 0 to alert immediately."
+                                />
+                            </Grid>
+                        </Grid>
+
                         <Box sx={{ display: 'flex', gap: 2 }}>
                             <Button variant="contained" startIcon={<SaveIcon />} onClick={() => saveEmail.mutate(email)} disabled={saveEmail.isPending}>
                                 {saveEmail.isPending ? 'Saving…' : 'Save Settings'}
@@ -694,6 +713,22 @@ export default function Settings() {
                                         label={<Typography variant="body2">Segment scan returns no devices</Typography>}
                                     />
                                 </Box>
+                            </Box>
+                        )}
+
+                        {/* Grace period — only visible when Telegram is enabled */}
+                        {telegram.telegram_alerts_enabled && (
+                            <Box sx={{ mt: 3, p: 2.5, bgcolor: 'rgba(255,255,255,0.03)', borderRadius: 1, border: '1px solid rgba(255,255,255,0.08)' }}>
+                                <Typography variant="subtitle2" sx={{ mb: 2, fontWeight: 600 }}>Notification Timing</Typography>
+                                <TextField
+                                    fullWidth
+                                    type="number"
+                                    label="Offline Grace Period (minutes)"
+                                    value={telegram.telegram_offline_grace_minutes}
+                                    onChange={(e) => setTelegram({ ...telegram, telegram_offline_grace_minutes: e.target.value })}
+                                    inputProps={{ min: 0, step: 1 }}
+                                    helperText="Wait this many minutes before sending a Telegram alert. If the device recovers within this window, no message is sent. Set to 0 to alert immediately."
+                                />
                             </Box>
                         )}
 

@@ -57,7 +57,7 @@ Time: ${formatInUserTimezone(new Date())}
     }
 }
 
-async function createAlert({ device_id, alert_type, message, severity, fastify }) {
+async function createAlert({ device_id, alert_type, message, severity, fastify, suppressEmail = false }) {
     // Alert deduplication: skip if identical alert exists within cooldown window
     const settings = getSettings();
 
@@ -106,12 +106,14 @@ async function createAlert({ device_id, alert_type, message, severity, fastify }
 
     // Check email preferences
     let shouldSendEmail = false;
-    if (alert_type === 'device_down' && severity === 'critical' && settings.alert_on_critical_offline === '1') shouldSendEmail = true;
-    if (alert_type === 'device_up' && settings.alert_on_critical_online === '1' && device_id) {
-        const device = db.prepare('SELECT is_critical FROM devices WHERE id = ?').get(device_id);
-        if (device?.is_critical) shouldSendEmail = true;
+    if (!suppressEmail) {
+        if (alert_type === 'device_down' && severity === 'critical' && settings.alert_on_critical_offline === '1') shouldSendEmail = true;
+        if (alert_type === 'device_up' && settings.alert_on_critical_online === '1' && device_id) {
+            const device = db.prepare('SELECT is_critical FROM devices WHERE id = ?').get(device_id);
+            if (device?.is_critical) shouldSendEmail = true;
+        }
+        if (alert_type === 'high_latency' && settings.alert_on_high_latency === '1') shouldSendEmail = true;
     }
-    if (alert_type === 'high_latency' && settings.alert_on_high_latency === '1') shouldSendEmail = true;
 
     if (shouldSendEmail) {
         const sent = await sendEmailAlert(alertObj);
