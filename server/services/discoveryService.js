@@ -111,16 +111,30 @@ function getServerL2Segment() {
 
     const candidates = [];
 
-    for (const [name, addrs] of Object.entries(interfaces)) {
+    // Prefer wired NIC names (en*, eth*, eno*, enp*, ens*) over wireless
+    // (wl*, wlan*, wlp*, wlo*) so the chosen L2 interface is stable and
+    // biased toward Ethernet when both are present.
+    const wiredRe = /^(eth|en[opsx]?|ens|eno|enp)/;
+    const wirelessRe = /^(wl|wlan|wlp|wlo|wlx)/;
+    const ifaceRank = (name) => {
+        if (wiredRe.test(name)) return 0;
+        if (wirelessRe.test(name)) return 2;
+        return 1;
+    };
+    const sortedEntries = Object.entries(interfaces).sort(
+        ([a], [b]) => ifaceRank(a) - ifaceRank(b)
+    );
+
+    for (const [name, addrs] of sortedEntries) {
         // Skip loopback early
         if (name === 'lo') {
             if (isDev) console.log(`[Discovery] Interface ${name}: skipped (loopback)`);
             continue;
         }
 
-        // Skip virtual/container interfaces by name
-        if (/^(docker|br-|veth|virbr|lxc|lxd|cni|flannel|calico)/.test(name)) {
-            if (isDev) console.log(`[Discovery] Interface ${name}: skipped (virtual/container)`);
+        // Skip virtual/container/VPN interfaces by name
+        if (/^(docker|br-|veth|virbr|lxc|lxd|cni|flannel|calico|tailscale|tun|tap|wg|zt|utun)/.test(name)) {
+            if (isDev) console.log(`[Discovery] Interface ${name}: skipped (virtual/container/vpn)`);
             continue;
         }
 
@@ -766,7 +780,10 @@ async function arpScanL2Segment(io) {
                 mac: entry.mac,
                 ip: entry.ip,
                 hostname: entry.hostname || null,
-                is_wired: 1,
+                // ARP reaches all hosts on the L2 broadcast domain (wired AND
+                // wireless via bridged APs); medium type is unknown from ARP.
+                // Leave null so COALESCE preserves any value set by UniFi.
+                is_wired: null,
                 source: 'arp_scan',
                 segment_id: l2.segment_id
             });
