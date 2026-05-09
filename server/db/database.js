@@ -87,19 +87,34 @@ try {
 }
 
 // Migration: Add username column to users table if not exists
+// SQLite does not support ALTER TABLE ADD COLUMN with a UNIQUE constraint,
+// so we add the plain column first and enforce uniqueness via a separate index.
 try {
-    db.prepare("ALTER TABLE users ADD COLUMN username TEXT UNIQUE").run();
+    db.prepare("ALTER TABLE users ADD COLUMN username TEXT").run();
     console.log('Database Migration: Added username column to users table.');
-    // Populate existing users with username derived from their email prefix
-    const existingUsers = db.prepare("SELECT id, email FROM users WHERE username IS NULL").all();
-    for (const u of existingUsers) {
-        const derived = u.email.split('@')[0].replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 31);
-        db.prepare("UPDATE users SET username = ? WHERE id = ?").run(derived, u.id);
-    }
 } catch (err) {
     if (!err.message.includes('duplicate column name')) {
         console.warn('Database Migration Warning (username column):', err.message);
     }
+}
+// Populate username for any user that still has NULL (covers first run after migration
+// and installations where the previous UNIQUE migration silently failed).
+try {
+    const nullUsers = db.prepare("SELECT id, email FROM users WHERE username IS NULL").all();
+    for (const u of nullUsers) {
+        const derived = u.email.split('@')[0].replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 31);
+        db.prepare("UPDATE users SET username = ? WHERE id = ?").run(derived, u.id);
+    }
+    if (nullUsers.length > 0) {
+        console.log(`Database Migration: Populated username for ${nullUsers.length} existing user(s).`);
+    }
+} catch (err) {
+    console.warn('Database Migration Warning (username population):', err.message);
+}
+try {
+    db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_username ON users(username)");
+} catch (err) {
+    console.warn('Database Migration Warning (username unique index):', err.message);
 }
 
 module.exports = db;
