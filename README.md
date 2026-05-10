@@ -235,7 +235,16 @@ If you already run Nginx, Traefik, or another proxy, skip Caddy entirely. Use ju
 docker compose up -d --build
 ```
 
-Proxy traffic to `http://<server-ip>:3001`. The app is configured with `trustProxy: true`, so it will correctly read `X-Forwarded-For` and `X-Forwarded-Proto` headers from your proxy.
+Proxy HTTPS traffic to `http://<server-ip>:3001`. Add one extra env var so auth cookies are marked secure over HTTPS:
+
+```env
+COOKIE_SECURE=true
+```
+
+The app is configured with `trustProxy: true`, so it will correctly read `X-Forwarded-For` and `X-Forwarded-Proto` headers from your proxy.
+
+> [!NOTE]
+> Do not set `COOKIE_SECURE=true` for plain HTTP deployments — browsers will silently drop secure cookies on HTTP connections and logins will fail.
 
 ---
 
