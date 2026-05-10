@@ -14,8 +14,15 @@
 services:
   netaiq:
     build: .
-    ports:
-      - "${PORT:-3001}:3001"
+
+    # Host networking gives the container direct access to the physical NIC
+    # (e.g. enp0s3 / eth0) so os.networkInterfaces() returns the real LAN
+    # interface and nmap ARP scanning targets the actual L2 segment.
+    # Without this the container is isolated on a Docker bridge (172.x.x.x)
+    # and L2 detection picks the wrong interface.
+    # Port bindings are unnecessary in host mode — the app binds PORT on the
+    # host network stack directly.
+    network_mode: host
 
     # NET_RAW / NET_ADMIN are required for nmap's ARP-based MAC discovery on
     # the local L2 segment. The Dockerfile uses `setcap` so only the nmap

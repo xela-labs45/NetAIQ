@@ -9,37 +9,35 @@
 #   - localhost or LAN IP  →  Caddy internal CA (self-signed, browser warning)
 #   - Public domain        →  Let's Encrypt (trusted by all browsers, free)
 #
+# Both services run with network_mode: host so the app can see the physical
+# NIC for L2 / ARP scanning. Caddy binds ports 80 and 443 directly on the
+# host — no port-mapping needed.
+#
 # Required .env variables (add these if using this overlay):
 #   SITE_ADDRESS=localhost       # or your LAN IP / public domain
-#   HTTP_PORT=3080               # host port mapped to Caddy's :80
-#   HTTPS_PORT=3443              # host port mapped to Caddy's :443
 #
-# For Let's Encrypt to work, HTTP_PORT must be 80 (or port 80 must be
-# forwarded to HTTP_PORT at your router) so ACME HTTP-01 challenge can reach
-# Caddy from the public internet.
+# Caddy listens on ports 80 (HTTP redirect) and 443 (HTTPS) directly on the
+# host. For Let's Encrypt the host must be reachable on port 80 from the
+# public internet so the ACME HTTP-01 challenge can succeed.
 # ─────────────────────────────────────────────────────────────────────────────
 
 services:
   netaiq:
-    # Remove the direct port binding from the base file — Caddy is the only
-    # entry point. The app remains reachable inside the private bridge.
-    ports: []
-    expose:
-      - "${PORT:-3001}"
+    # Caddy is the only entry point — enforce secure cookies.
     environment:
       - COOKIE_SECURE=true
-    networks:
-      - netaiq_net
+    # Host networking is inherited from docker-compose.yml (required for L2
+    # scanning). No additional network config needed here.
 
   caddy:
     # Pinned minor version for reproducible builds. Bump deliberately after
     # reviewing the Caddy changelog.
     image: caddy:2.8-alpine
     restart: always
-    ports:
-      - "${HTTP_PORT:-3080}:80"
-      - "${HTTPS_PORT:-3443}:443"
-      - "${HTTPS_PORT:-3443}:443/udp" # HTTP/3 (QUIC)
+    # Both services share the host network stack so Caddy reaches netaiq at
+    # localhost:3001 and binds ports 80/443 directly on the host NIC.
+    # Port mapping is not needed in host mode.
+    network_mode: host
     environment:
       - SITE_ADDRESS=${SITE_ADDRESS:-localhost}
     volumes:
@@ -56,8 +54,6 @@ services:
     cap_add:
       # Required to bind ports 80 and 443 as a non-root user.
       - NET_BIND_SERVICE
-    networks:
-      - netaiq_net
     depends_on:
       netaiq:
         condition: service_healthy
@@ -66,11 +62,6 @@ services:
       interval: 30s
       timeout: 5s
       retries: 3
-
-networks:
-  # Private bridge — keeps the app unreachable except through Caddy.
-  netaiq_net:
-    driver: bridge
 
 volumes:
   caddy_data:
