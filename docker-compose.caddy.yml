@@ -26,6 +26,8 @@ services:
     ports: []
     expose:
       - "${PORT:-3001}"
+    environment:
+      - COOKIE_SECURE=true
     networks:
       - netaiq_net
 

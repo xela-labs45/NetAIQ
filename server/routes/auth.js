@@ -79,7 +79,7 @@ module.exports = async function (fastify, opts) {
                 .setCookie('token', token, {
                     path: '/',
                     httpOnly: true,
-                    secure: process.env.NODE_ENV === 'production',
+                    secure: process.env.COOKIE_SECURE === 'true',
                     sameSite: 'lax',
                     maxAge: 8 * 60 * 60 // 8 hours
                 })

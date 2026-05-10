@@ -105,7 +105,7 @@ Navigate to **[http://localhost:3001](http://localhost:3001)** (or `http://<serv
 
 | Field | Value |
 |---|---|
-| Username | `admin` |
+| Username | `admin` *(lowercase — case-sensitive)* |
 | Password | `Admin@1234` |
 
 > [!WARNING]
