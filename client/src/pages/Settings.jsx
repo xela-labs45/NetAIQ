@@ -744,8 +744,8 @@ export default function Settings() {
                                 </Typography>
                                 {telegram.telegram_ai_enhanced && (() => {
                                     const hasKey = ai.ai_provider === 'openrouter'
-                                        ? !!ai.ai_openrouter_key && !ai.ai_openrouter_key.startsWith('sk-or-*')
-                                        : !!ai.ai_anthropic_key && !ai.ai_anthropic_key.startsWith('sk-ant-*');
+                                        ? !!ai.ai_openrouter_key
+                                        : !!ai.ai_anthropic_key;
                                     if (!hasKey) return (
                                         <Box sx={{ mt: 1.5, ml: 5.8, display: 'flex', alignItems: 'center', gap: 1, p: 1, borderRadius: 1, bgcolor: 'rgba(255,152,0,0.1)', border: '1px solid rgba(255,152,0,0.3)' }}>
                                             <ErrorIcon fontSize="small" sx={{ color: 'warning.main' }} />
@@ -762,8 +762,8 @@ export default function Settings() {
                         <Box sx={{ mt: 4, display: 'flex', gap: 2 }}>
                             {(() => {
                                 const hasKey = ai.ai_provider === 'openrouter'
-                                    ? !!ai.ai_openrouter_key && !ai.ai_openrouter_key.startsWith('sk-or-*')
-                                    : !!ai.ai_anthropic_key && !ai.ai_anthropic_key.startsWith('sk-ant-*');
+                                    ? !!ai.ai_openrouter_key
+                                    : !!ai.ai_anthropic_key;
                                 const isMissingKey = telegram.telegram_ai_enhanced && !hasKey;
                                 const isMissingTelegramCreds = telegram.telegram_alerts_enabled && (!telegram.telegram_bot_token || !telegram.telegram_chat_id);
                                 const isDisabled = saveTelegram.isPending || isMissingTelegramCreds || isMissingKey;
