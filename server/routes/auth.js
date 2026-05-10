@@ -46,25 +46,29 @@ module.exports = async function (fastify, opts) {
         try {
             const { username, password } = request.body;
 
-            if (isAccountLocked(username)) {
-                return reply.code(429).send({ error: true, message: 'Account temporarily locked. Try again in 15 minutes.' });
-            }
-
-            const user = db.prepare('SELECT * FROM users WHERE username = ?').get(username);
+            // Accept username or email — allows existing users whose username was
+            // auto-derived from email to still sign in with either credential.
+            const user = db.prepare(
+                'SELECT * FROM users WHERE username = ? OR email = ?'
+            ).get(username, username);
 
             if (!user) {
-                recordFailedAttempt(username);
                 return reply.code(401).send({ error: true, message: 'Invalid credentials' });
+            }
+
+            // Lockout is keyed on the canonical username, not the raw login input.
+            if (isAccountLocked(user.username)) {
+                return reply.code(429).send({ error: true, message: 'Account temporarily locked. Try again in 15 minutes.' });
             }
 
             const match = await bcrypt.compare(password, user.password_hash);
 
             if (!match) {
-                recordFailedAttempt(username);
+                recordFailedAttempt(user.username);
                 return reply.code(401).send({ error: true, message: 'Invalid credentials' });
             }
 
-            clearAttempts(username);
+            clearAttempts(user.username);
 
             const token = fastify.jwt.sign(
                 { id: user.id, username: user.username, mustChange: user.must_change_password === 1 },
