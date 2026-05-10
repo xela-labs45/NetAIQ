@@ -799,26 +799,50 @@ Rules:
 - Keep total response under 150 words`;
 
 const ALERT_USER_PROMPTS = {
-  critical_device_offline: (ctx) => `A critical network device has gone offline.
+  critical_device_offline: (ctx) => {
+    const historyLines = [];
+    if (ctx.outage_count_30d != null) historyLines.push(`Outages in last 30 days: ${ctx.outage_count_30d}`);
+    if (ctx.uptime_7d_pct != null) historyLines.push(`7-day uptime: ${ctx.uptime_7d_pct}%`);
+    if (ctx.avg_outage_duration_min != null) historyLines.push(`Average past outage duration: ${ctx.avg_outage_duration_min} minutes`);
+    if (ctx.recent_outage_times?.length) historyLines.push(`Recent outage timestamps: ${ctx.recent_outage_times.join(', ')}`);
+    if (ctx.concurrent_offline_in_segment?.length) historyLines.push(`Other devices also offline in segment: ${ctx.concurrent_offline_in_segment.join(', ')}`);
+    if (ctx.pre_outage_pings?.length) historyLines.push(`Last 5 pings before outage (newest first): ${ctx.pre_outage_pings.join(' → ')}`);
+    if (ctx.device_notes) historyLines.push(`Admin notes: ${ctx.device_notes}`);
+
+    return `A critical network device has gone offline.
 
 Device Name: ${ctx.hostname || 'Unknown'}
 IP Address: ${ctx.ip_address || 'Unknown'}
 MAC Address: ${ctx.mac_address || 'Unknown'}
+Device Type: ${ctx.device_type || 'Unknown'}
+Connection: ${ctx.is_wired == null ? 'Unknown' : ctx.is_wired ? 'Wired' : 'Wireless'}
 Network Segment: ${ctx.segment_name || 'Unknown'}
 Subnet: ${ctx.segment_cidr || 'Unknown'}
 Last Seen: ${ctx.last_seen || 'Unknown'}
 Time Offline: ${ctx.minutes_offline || 'Unknown'} minutes
+${historyLines.length ? '\nHistorical context:\n' + historyLines.map(l => '- ' + l).join('\n') : ''}
 
-What are the immediate action steps to investigate and restore this device?`,
+What are the immediate action steps to investigate and restore this device? Factor in whether this appears isolated or correlated, and whether it is a known recurring issue.`;
+  },
 
-  critical_device_online: (ctx) => `A critical network device has come back online after being offline.
+  critical_device_online: (ctx) => {
+    const historyLines = [];
+    if (ctx.outage_count_30d != null) historyLines.push(`Outages in last 30 days (including this one): ${ctx.outage_count_30d}`);
+    if (ctx.uptime_7d_pct != null) historyLines.push(`7-day uptime: ${ctx.uptime_7d_pct}%`);
+    if (ctx.avg_outage_duration_min != null) historyLines.push(`Average outage duration: ${ctx.avg_outage_duration_min} minutes`);
+    if (ctx.device_notes) historyLines.push(`Admin notes: ${ctx.device_notes}`);
+
+    return `A critical network device has come back online after being offline.
 
 Device Name: ${ctx.hostname || 'Unknown'}
 IP Address: ${ctx.ip_address || 'Unknown'}
+Device Type: ${ctx.device_type || 'Unknown'}
 Network Segment: ${ctx.segment_name || 'Unknown'}
 Downtime: ${ctx.downtime || 'Unknown'}
+${historyLines.length ? '\nHistorical context:\n' + historyLines.map(l => '- ' + l).join('\n') : ''}
 
-What follow-up steps should the administrator take to confirm stability and document the incident?`,
+What follow-up steps should the administrator take to confirm stability and document the incident? If this is a recurring issue, escalate your recommendations accordingly.`;
+  },
 
   ap_offline: (ctx) => `A UniFi Access Point has gone offline.
 

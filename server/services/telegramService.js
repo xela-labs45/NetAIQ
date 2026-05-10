@@ -122,6 +122,86 @@ async function sendMessage(message) {
     }
 }
 
+// ─── Device History Enrichment ───────────────────────────────────
+
+function getDeviceOutageHistory(deviceId, segmentId) {
+    try {
+        const recentOutages = db.prepare(`
+            SELECT created_at FROM alerts
+            WHERE device_id = ? AND alert_type = 'device_down'
+              AND created_at > datetime('now', '-30 days')
+            ORDER BY created_at DESC LIMIT 6
+        `).all(deviceId);
+
+        const durationRows = db.prepare(`
+            SELECT d.created_at as down_at,
+                   ROUND((julianday(MIN(u.created_at)) - julianday(d.created_at)) * 1440, 0) as duration_min
+            FROM alerts d
+            JOIN alerts u ON u.device_id = d.device_id
+              AND u.alert_type = 'device_up' AND u.created_at > d.created_at
+            WHERE d.device_id = ? AND d.alert_type = 'device_down'
+              AND d.created_at > datetime('now', '-30 days')
+            GROUP BY d.id ORDER BY d.created_at DESC LIMIT 5
+        `).all(deviceId);
+
+        const pingStats = db.prepare(`
+            SELECT
+                ROUND(100.0 * SUM(CASE WHEN status = 'up' THEN 1 ELSE 0 END) / COUNT(*), 1) as uptime_pct,
+                ROUND(AVG(CASE WHEN status = 'up' AND latency_ms IS NOT NULL THEN latency_ms END), 1) as avg_latency_ms
+            FROM ping_history WHERE device_id = ? AND timestamp > datetime('now', '-7 days')
+        `).get(deviceId);
+
+        const prePings = db.prepare(`
+            SELECT status, latency_ms FROM ping_history
+            WHERE device_id = ? ORDER BY timestamp DESC LIMIT 5
+        `).all(deviceId);
+
+        let concurrentOffline = [];
+        if (segmentId) {
+            concurrentOffline = db.prepare(`
+                SELECT d.hostname, d.ip_address
+                FROM devices d
+                JOIN (
+                    SELECT device_id, status
+                    FROM ping_history
+                    WHERE timestamp > datetime('now', '-1 hour')
+                    GROUP BY device_id
+                    HAVING MAX(timestamp)
+                ) latest ON latest.device_id = d.id AND latest.status = 'down'
+                WHERE d.segment_id = ? AND d.id != ?
+            `).all(segmentId, deviceId);
+        }
+
+        const deviceInfo = db.prepare(`
+            SELECT device_type, notes, vendor, is_wired,
+                   (SELECT device_type_suggestion FROM ai_device_identifications WHERE device_id = devices.id LIMIT 1) as ai_type
+            FROM devices WHERE id = ?
+        `).get(deviceId);
+
+        const durationsWithValue = durationRows.filter(r => r.duration_min != null && r.duration_min > 0);
+        const avgDuration = durationsWithValue.length > 0
+            ? Math.round(durationsWithValue.reduce((s, r) => s + r.duration_min, 0) / durationsWithValue.length)
+            : null;
+
+        return {
+            outage_count_30d: recentOutages.length,
+            recent_outage_times: recentOutages.slice(0, 5).map(r => r.created_at),
+            avg_outage_duration_min: avgDuration,
+            uptime_7d_pct: pingStats?.uptime_pct ?? null,
+            avg_latency_ms: pingStats?.avg_latency_ms ?? null,
+            pre_outage_pings: prePings.map(p => p.status + (p.latency_ms ? ` (${p.latency_ms}ms)` : '')),
+            concurrent_offline_in_segment: concurrentOffline.map(d => d.hostname || d.ip_address),
+            device_type: deviceInfo?.ai_type || deviceInfo?.device_type || null,
+            device_notes: deviceInfo?.notes || null,
+            vendor: deviceInfo?.vendor || null,
+            is_wired: deviceInfo?.is_wired != null ? !!deviceInfo.is_wired : null,
+        };
+    } catch (err) {
+        console.error('getDeviceOutageHistory error (non-critical):', err.message);
+        return {};
+    }
+}
+
 // ─── Downtime Formatter ──────────────────────────────────────────
 
 function formatDowntime(ms) {
@@ -190,6 +270,8 @@ async function sendCriticalDeviceOffline(device, segmentName) {
         `Check the network immediately.`
     ].filter(Boolean).join('\n');
 
+    const history = getDeviceOutageHistory(device.id, device.segment_id);
+
     const aiContext = {
         hostname: device.hostname,
         ip_address: device.ip_address,
@@ -197,7 +279,8 @@ async function sendCriticalDeviceOffline(device, segmentName) {
         segment_name: segmentName,
         segment_cidr: segmentCidr,
         last_seen: device.last_seen,
-        minutes_offline: device.last_seen ? Math.round((Date.now() - normalizeDate(device.last_seen).getTime()) / 60000) : null
+        minutes_offline: device.last_seen ? Math.round((Date.now() - normalizeDate(device.last_seen).getTime()) / 60000) : null,
+        ...history
     };
 
     const message = await appendAiSection(baseMessage, 'critical_device_offline', aiContext);
@@ -226,11 +309,18 @@ async function sendCriticalDeviceOnline(device, segmentName, downtimeMs) {
         `✅ Device is back online.`
     ].filter(Boolean).join('\n');
 
+    const history = getDeviceOutageHistory(device.id, device.segment_id);
+
     const aiContext = {
         hostname: device.hostname,
         ip_address: device.ip_address,
         segment_name: segmentName,
-        downtime: downtimeStr
+        downtime: downtimeStr,
+        device_type: history.device_type || null,
+        outage_count_30d: history.outage_count_30d ?? null,
+        avg_outage_duration_min: history.avg_outage_duration_min ?? null,
+        uptime_7d_pct: history.uptime_7d_pct ?? null,
+        device_notes: history.device_notes || null,
     };
 
     const message = await appendAiSection(baseMessage, 'critical_device_online', aiContext);
