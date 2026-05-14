@@ -5,12 +5,22 @@
 const fastify = require('fastify')({ logger: true, trustProxy: true });
 const path = require('path');
 const cors = require('@fastify/cors');
+const helmet = require('@fastify/helmet');
 const fastifyStatic = require('@fastify/static');
 const jwt = require('@fastify/jwt');
 const fastifyCookie = require('@fastify/cookie');
 const { Server } = require('socket.io');
 
 require('dotenv').config();
+
+process.on('unhandledRejection', (reason, promise) => {
+  fastify.log.error({ msg: 'Unhandled promise rejection', reason, promise });
+});
+
+process.on('uncaughtException', (err) => {
+  fastify.log.error({ msg: 'Uncaught exception — shutting down', err });
+  process.exit(1);
+});
 
 // Boot-time validation
 const REQUIRED_ENV = ['JWT_SECRET', 'DB_PATH', 'PORT'];
@@ -56,6 +66,8 @@ if (isWeakSecret) {
 // In production, CORS is disabled (origin: false) because Caddy serves both
 // frontend and API from the same origin. If deployed without a reverse proxy,
 // set CORS_ORIGIN env var or add an explicit allowed origin here.
+fastify.register(helmet, { contentSecurityPolicy: false });
+
 fastify.register(cors, {
   origin: process.env.NODE_ENV === 'production' ? false : ['http://localhost:5173', 'https://localhost:5173'],
   credentials: true
