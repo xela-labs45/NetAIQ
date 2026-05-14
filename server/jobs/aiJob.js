@@ -5,6 +5,8 @@ const settingsService = require('../services/settingsService');
 
 let anomalyTimer = null;
 let triageTimer = null;
+let ouiTimer = null;
+let ouiStartupTimer = null;
 let anomalyRunning = false;
 let triageRunning = false;
 let lastTriageUnreadCount = null;
@@ -62,15 +64,16 @@ function startAiJobs(fastify) {
 
 
   // OUI auto-identification: run at startup for existing unidentified devices,
-  // then every 5 minutes for newly discovered ones.
-  setTimeout(() => {
+  // then every 5 minutes for newly discovered ones. Both handles are tracked
+  // so restartAiJobs() can clear them and avoid leaking timers.
+  ouiStartupTimer = setTimeout(() => {
     try {
       const count = ouiIdentifyUnprocessed();
       if (count > 0) fastify.io.emit('discovery:oui_identified', { count });
     } catch (e) { console.error('OUI startup job error:', e.message); }
   }, 5000);
 
-  setInterval(() => {
+  ouiTimer = setInterval(() => {
     try {
       const count = ouiIdentifyUnprocessed();
       if (count > 0) fastify.io.emit('discovery:oui_identified', { count });
@@ -128,6 +131,8 @@ async function runTriageJob(fastify, forced = false) {
 function restartAiJobs(fastify) {
   if (anomalyTimer) clearInterval(anomalyTimer);
   if (triageTimer) clearInterval(triageTimer);
+  if (ouiTimer) clearInterval(ouiTimer);
+  if (ouiStartupTimer) clearTimeout(ouiStartupTimer);
   startAiJobs(fastify);
   console.log('AI jobs restarted with new intervals');
 }

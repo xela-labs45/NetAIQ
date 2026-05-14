@@ -30,5 +30,7 @@ npm-debug.log*
 # Generated OUI database (rebuild with: npm run update-oui)
 server/data/oui-ieee.json
 
-# Bug Files
+# Local-only audit / scratch notes
 BUG_AUDIT.md
+NOTES.md
+TODO.md

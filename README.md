@@ -23,6 +23,7 @@
 - 🔍 **MAC OUI Lookup** — 1,100+ device manufacturers identified instantly (IoT, mobile, gaming, network, servers, cameras)
 - 🌐 **UniFi Integration** — Full health oversight including WAN stats, Access Point status, and throughput monitoring
 - 🚨 **Bulk Device Management** — Register multiple discovered devices in a single click
+- 📈 **Bandwidth Insights** — Top-talker view and per-period WAN throughput charts sourced from UniFi reports
 - 📧 **Automated Alerting** — Configurable email alerts (SMTP) for device events and high latency
 - 📲 **Telegram Notifications** — Real-time bot alerts for critical device offline/online, AP status changes, and segment outages
 - 🤖 **AI Insights** — Automated device identification (OUI + AI), 24h anomaly detection, and alert triage via Anthropic or OpenRouter
@@ -377,6 +378,18 @@ cd client && npm install && cd ..
 npm run dev
 ```
 
+The Vite dev server proxies `/api` and `/socket.io` to `http://localhost:3001`,
+so you can hit the UI at `http://localhost:5173` while the backend runs on
+3001. Make sure your `.env` exists (copy from `.env.example`) before starting.
+
+---
+
+## 📚 Further Documentation
+
+For deeper operational details — backup/restore, upgrade paths, log locations,
+common failure modes, security hardening, and the full REST API reference —
+see [DEPLOYMENT.md](DEPLOYMENT.md) and [API.md](API.md).
+
 ---
 
 ## 📁 Project Structure
@@ -386,17 +399,24 @@ netaiq-dashboard/
 ├── client/                  # React frontend (Vite)
 │   └── src/
 │       ├── components/      # Reusable UI components
-│       ├── hooks/           # useAuth, useSocket
-│       └── pages/           # Dashboard, Devices, Segments, Alerts, Settings
+│       ├── hooks/           # useAuth, useSocket, useInfiniteDevices
+│       └── pages/           # Dashboard, Devices, Segments, Bandwidth,
+│                            # Alerts, Insights, Settings, Login, ChangePassword
 ├── server/                  # Fastify backend
 │   ├── db/                  # SQLite schema, migrations, seed
-│   ├── jobs/                # Background jobs (ping, UniFi sync)
+│   ├── jobs/                # Background jobs (ping, UniFi sync, AI, cleanup)
 │   ├── routes/              # API route handlers
-│   └── services/            # Business logic (ping, UniFi, scan, alert, email)
+│   ├── services/            # Business logic (ping, UniFi, scan, alert, AI, Telegram)
+│   ├── scripts/             # Maintenance scripts (e.g. update-oui-db)
+│   └── public/              # Built frontend assets (output of `npm run build`)
+├── assets/                  # README screenshots
 ├── data/                    # SQLite database (auto-created, persisted via volume)
-├── netaiq-brand/            # Brand assets (SVG/PNG source files)
+├── Caddyfile                # Reverse-proxy config used by the HTTPS overlay
 ├── Dockerfile
-├── docker-compose.yml
+├── docker-compose.yml       # Default HTTP stack
+├── docker-compose.caddy.yml # Optional HTTPS overlay
+├── API.md                   # REST API quick reference
+├── DEPLOYMENT.md            # Deep-dive deployment, ops & troubleshooting guide
 └── .env.example
 ```
 
