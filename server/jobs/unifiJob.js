@@ -37,10 +37,11 @@ module.exports = function (fastify) {
     };
 
     const msToCron = (ms) => {
-        if (ms <= 60000) return '* * * * *'; // 1m
-        if (ms <= 300000) return '*/5 * * * *'; // 5m
-        if (ms <= 900000) return '*/15 * * * *'; // 15m
-        return '*/5 * * * *';
+        if (ms <= 60000)   return '* * * * *';   // 1m
+        if (ms <= 300000)  return '*/5 * * * *';  // 5m
+        if (ms <= 900000)  return '*/15 * * * *'; // 15m
+        if (ms <= 1800000) return '*/30 * * * *'; // 30m
+        return '0 * * * *';                       // hourly cap
     };
 
     const intervalMs = getInterval();

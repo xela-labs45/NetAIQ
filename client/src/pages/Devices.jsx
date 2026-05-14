@@ -441,7 +441,7 @@ export default function Devices() {
       <Drawer
         anchor="right"
         open={drawerOpen}
-        onClose={() => setDrawerOpen(false)}
+        onClose={() => { setDrawerOpen(false); setSelectedDevice(null); }}
         PaperProps={{ sx: { width: 500, p: 3, bgcolor: 'background.paper', backgroundImage: 'none', borderLeft: '1px solid rgba(255,255,255,0.08)' } }}
       >
         {selectedDevice && (

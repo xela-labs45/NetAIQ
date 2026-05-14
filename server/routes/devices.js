@@ -289,7 +289,7 @@ module.exports = async function (fastify, opts) {
 
     fastify.get('/:id/history', async (request, reply) => {
         const { id } = request.params;
-        const { hours = 24 } = request.query;
+        const hours = Math.max(1, parseInt(request.query.hours, 10) || 24);
 
         const timeLimit = toSqliteTimestamp(new Date(Date.now() - (hours * 60 * 60 * 1000)));
 

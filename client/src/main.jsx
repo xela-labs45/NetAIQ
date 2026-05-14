@@ -9,7 +9,14 @@ import theme from './theme'
 import { AuthProvider } from './hooks/useAuth'
 import { SocketProvider } from './hooks/useSocket'
 
-const queryClient = new QueryClient();
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      staleTime: 30_000,
+      refetchOnWindowFocus: false,
+    },
+  },
+});
 
 ReactDOM.createRoot(document.getElementById('root')).render(
     <React.StrictMode>

@@ -70,8 +70,8 @@ try {
 const legacyInterval = db.prepare("SELECT value FROM settings WHERE key = 'ping_interval_ms'").get();
 if (legacyInterval) {
     const legacySeconds = Math.max(300, Math.floor(parseInt(legacyInterval.value, 10) / 1000));
-    db.prepare("INSERT INTO settings (key, value) VALUES ('segment_scan_interval', ?)").run(legacySeconds.toString());
-    db.prepare("INSERT INTO settings (key, value) VALUES ('critical_ping_interval', '120')").run();
+    db.prepare("INSERT OR IGNORE INTO settings (key, value) VALUES ('segment_scan_interval', ?)").run(legacySeconds.toString());
+    db.prepare("INSERT OR IGNORE INTO settings (key, value) VALUES ('critical_ping_interval', '120')").run();
     db.prepare("DELETE FROM settings WHERE key = 'ping_interval_ms'").run();
     console.log(`Migrated legacy scan interval to split polling configuration (${legacySeconds}s segment scan).`);
 }

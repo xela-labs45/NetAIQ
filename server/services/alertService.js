@@ -70,10 +70,11 @@ async function createAlert({ device_id, alert_type, message, severity, fastify, 
     }
 
     const recentAlert = db.prepare(`
-    SELECT id, created_at FROM alerts 
-    WHERE device_id = ? AND alert_type = ? 
+    SELECT id, created_at FROM alerts
+    WHERE (device_id = ? OR (device_id IS NULL AND ? IS NULL))
+      AND alert_type = ?
     ORDER BY created_at DESC LIMIT 1
-  `).get(device_id, alert_type);
+  `).get(device_id, device_id, alert_type);
 
     if (recentAlert) {
         // Append 'Z' so V8 parses the SQLite 'YYYY-MM-DD HH:MM:SS' format as UTC

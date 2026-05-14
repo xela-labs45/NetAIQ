@@ -161,14 +161,13 @@ function getDeviceOutageHistory(deviceId, segmentId) {
             concurrentOffline = db.prepare(`
                 SELECT d.hostname, d.ip_address
                 FROM devices d
-                JOIN (
-                    SELECT device_id, status
-                    FROM ping_history
-                    WHERE timestamp > datetime('now', '-1 hour')
-                    GROUP BY device_id
-                    HAVING MAX(timestamp)
-                ) latest ON latest.device_id = d.id AND latest.status = 'down'
-                WHERE d.segment_id = ? AND d.id != ?
+                JOIN ping_history latest ON latest.id = (
+                    SELECT id FROM ping_history
+                    WHERE device_id = d.id
+                      AND timestamp > datetime('now', '-1 hour')
+                    ORDER BY timestamp DESC LIMIT 1
+                )
+                WHERE d.segment_id = ? AND d.id != ? AND latest.status = 'down'
             `).all(segmentId, deviceId);
         }
 

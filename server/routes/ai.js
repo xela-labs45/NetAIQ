@@ -3,6 +3,7 @@ const {
   getAiStatus, testConnection, fetchModels, clearModelCache,
   identifyDevice, identifyDiscoveredDevice, getUnidentifiedDevices, detectAnomalies, summariseAlerts
 } = require('../services/aiService');
+const alertService = require('../services/alertService');
 const { restartAiJobs, forceTriageRun, runTriageJob } = require('../jobs/aiJob');
 
 module.exports = async function (fastify, opts) {
@@ -162,6 +163,9 @@ module.exports = async function (fastify, opts) {
     const { device_id } = request.body;
     if (!device_id) return reply.code(400).send({ error: 'device_id required' });
 
+    const device = db.prepare('SELECT id FROM devices WHERE id = ?').get(device_id);
+    if (!device) return reply.code(404).send({ error: 'Device not found' });
+
     const result = await identifyDevice(device_id);
 
     if (result && result.error && result.rateLimited) {
@@ -174,6 +178,9 @@ module.exports = async function (fastify, opts) {
   fastify.post('/identify-mac', async (request, reply) => {
     const { mac_address } = request.body;
     if (!mac_address) return reply.code(400).send({ error: 'mac_address required' });
+
+    const discovered = db.prepare('SELECT mac_address FROM discovered_devices WHERE mac_address = ?').get(mac_address);
+    if (!discovered) return reply.code(404).send({ error: 'MAC not found in discovered devices' });
 
     const result = await identifyDiscoveredDevice(mac_address);
 
@@ -197,6 +204,10 @@ module.exports = async function (fastify, opts) {
     const placeholders = alert_ids.map(() => '?').join(',');
     const stmt = db.prepare(`UPDATE alerts SET is_read = 1 WHERE id IN(${placeholders})`);
     const info = stmt.run(...alert_ids);
+
+    if (fastify.io && info.changes > 0) {
+      fastify.io.emit('alert:count', alertService.getUnreadCount());
+    }
 
     return { dismissed: info.changes };
   });
