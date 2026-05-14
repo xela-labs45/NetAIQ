@@ -1,8 +1,33 @@
 const db = require('../db/database');
+const store = require('./notificationStateStore');
 
 // Map<entityKey, { since: number, telegramNotifiedAt: number|null, emailNotifiedAt: number|null }>
 // entityKey format: `device:${id}`
 const tracker = new Map();
+
+const ENTITY_TYPE = 'device';
+
+// Rehydrate from DB on module load so notifications survive server restarts.
+// better-sqlite3 + database.js initialise synchronously, so by the time this
+// module is required the `notification_state` table is guaranteed to exist.
+for (const row of store.loadByType(ENTITY_TYPE)) {
+    tracker.set(row.entity_key, {
+        since: row.since,
+        emailNotifiedAt: row.email_notified_at,
+        telegramNotifiedAt: row.telegram_notified_at
+    });
+}
+
+function persist(entityKey) {
+    const state = tracker.get(entityKey);
+    if (!state) return;
+    store.upsert(ENTITY_TYPE, entityKey, {
+        since: state.since,
+        emailNotifiedAt: state.emailNotifiedAt,
+        telegramNotifiedAt: state.telegramNotifiedAt,
+        extra: null
+    });
+}
 
 function getGraceMs(channel) {
     const key = channel === 'email' ? 'email_offline_grace_minutes' : 'telegram_offline_grace_minutes';
@@ -14,6 +39,7 @@ function getGraceMs(channel) {
 function markOffline(entityKey) {
     if (!tracker.has(entityKey)) {
         tracker.set(entityKey, { since: Date.now(), emailNotifiedAt: null, telegramNotifiedAt: null });
+        persist(entityKey);
     }
     return tracker.get(entityKey);
 }
@@ -21,6 +47,7 @@ function markOffline(entityKey) {
 function markOnline(entityKey) {
     const state = tracker.get(entityKey);
     tracker.delete(entityKey);
+    store.remove(ENTITY_TYPE, entityKey);
     return state;
 }
 
@@ -37,6 +64,7 @@ function markNotified(entityKey, channel) {
     if (!state) return;
     if (channel === 'email') state.emailNotifiedAt = Date.now();
     else state.telegramNotifiedAt = Date.now();
+    persist(entityKey);
 }
 
 function wasNotified(entityKey, channel) {

@@ -888,6 +888,14 @@ async function enhanceAlertWithAI(eventType, context) {
     const aiEnhanced = settingsService.get('telegram_ai_enhanced');
     if (aiEnhanced !== '1') return null;
 
+    // Global cap to bound AI cost during alert bursts (e.g. switch failure cascades 20 alerts).
+    // When exceeded, base alert still ships — AI section is just skipped.
+    const rate = checkRateLimit('enhance_alert_global', 10, 60000);
+    if (!rate.allowed) {
+      console.warn(`enhanceAlertWithAI: global rate limit reached, skipping AI for ${eventType} (resets in ${rate.resetIn}s)`);
+      return null;
+    }
+
     const promptBuilder = ALERT_USER_PROMPTS[eventType];
     if (!promptBuilder) {
       console.warn(`enhanceAlertWithAI: unknown event type '${eventType}'`);

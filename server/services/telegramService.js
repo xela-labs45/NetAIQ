@@ -71,9 +71,10 @@ function isEventEnabled(settings, key) {
 /**
  * Send a message via the Telegram Bot API.
  * @param {string} message — HTML-formatted message body
- * @returns {Promise<{ok: boolean, description?: string}>}
+ * @param {number|null} replyToMessageId — optional message_id to reply to (threading)
+ * @returns {Promise<{ok: boolean, description?: string, result?: {message_id: number}}>}
  */
-async function sendMessage(message) {
+async function sendMessage(message, replyToMessageId = null) {
     const settings = getSettings();
     const { telegram_bot_token, telegram_chat_id, telegram_alerts_enabled } = settings;
 
@@ -95,15 +96,22 @@ async function sendMessage(message) {
 
     const url = `https://api.telegram.org/bot${telegram_bot_token}/sendMessage`;
 
+    const payload = {
+        chat_id: telegram_chat_id,
+        text: message,
+        parse_mode: 'HTML'
+    };
+    if (replyToMessageId) {
+        payload.reply_to_message_id = replyToMessageId;
+        // Don't fail if the parent message is gone — still deliver the AI follow-up.
+        payload.allow_sending_without_reply = true;
+    }
+
     try {
         const response = await fetch(url, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                chat_id: telegram_chat_id,
-                text: message,
-                parse_mode: 'HTML'
-            }),
+            body: JSON.stringify(payload),
             signal: AbortSignal.timeout(10000)
         });
 
@@ -221,18 +229,27 @@ function formatTimestamp() {
 }
 
 /**
- * Append AI-generated remediation steps to a base message.
- * Returns the base message unchanged if AI is unavailable or fails.
+ * Send AI-generated remediation steps as a reply to a base alert message.
+ * Fire-and-forget — never throws. Bails silently if the base send failed,
+ * AI is unavailable, or AI returns nothing.
+ *
+ * @param {object} parentResult — the response object from sendMessage()
+ * @param {string} eventType
+ * @param {object} context
  */
-async function appendAiSection(baseMessage, eventType, context) {
+async function sendAiFollowup(parentResult, eventType, context) {
     try {
+        const messageId = parentResult?.result?.message_id;
+        if (!messageId) return;   // base send failed or alerts disabled — nothing to reply to
+
         const aiService = getAiService();
         const aiText = await aiService.enhanceAlertWithAI(eventType, context);
-        if (!aiText) return baseMessage;
-        return baseMessage + '\n\n' + '🤖 <b>AI Recommended Actions</b>\n' + aiText;
+        if (!aiText) return;
+
+        const followupMessage = '🤖 <b>AI Recommended Actions</b>\n' + aiText;
+        await sendMessage(followupMessage, messageId);
     } catch (err) {
-        console.error('Telegram AI enhancement error (non-blocking):', err.message);
-        return baseMessage;
+        console.error('Telegram AI followup error (non-blocking):', err.message);
     }
 }
 
@@ -282,8 +299,9 @@ async function sendCriticalDeviceOffline(device, segmentName) {
         ...history
     };
 
-    const message = await appendAiSection(baseMessage, 'critical_device_offline', aiContext);
-    return sendMessage(message);
+    const result = await sendMessage(baseMessage);
+    sendAiFollowup(result, 'critical_device_offline', aiContext);
+    return result;
 }
 
 /**
@@ -322,8 +340,9 @@ async function sendCriticalDeviceOnline(device, segmentName, downtimeMs) {
         device_notes: history.device_notes || null,
     };
 
-    const message = await appendAiSection(baseMessage, 'critical_device_online', aiContext);
-    return sendMessage(message);
+    const result = await sendMessage(baseMessage);
+    sendAiFollowup(result, 'critical_device_online', aiContext);
+    return result;
 }
 
 /**
@@ -356,8 +375,9 @@ async function sendApOffline(ap) {
         minutes_offline: ap.last_seen ? Math.round((Date.now() - normalizeDate(ap.last_seen).getTime()) / 60000) : null
     };
 
-    const message = await appendAiSection(baseMessage, 'ap_offline', aiContext);
-    return sendMessage(message);
+    const result = await sendMessage(baseMessage);
+    sendAiFollowup(result, 'ap_offline', aiContext);
+    return result;
 }
 
 /**
@@ -387,8 +407,9 @@ async function sendApOnline(ap, downtimeMs) {
         downtime: downtimeStr
     };
 
-    const message = await appendAiSection(baseMessage, 'ap_online', aiContext);
-    return sendMessage(message);
+    const result = await sendMessage(baseMessage);
+    sendAiFollowup(result, 'ap_online', aiContext);
+    return result;
 }
 
 /**
@@ -419,8 +440,9 @@ async function sendSegmentOffline(segment, expectedDevices, hostsFound) {
         current_time: formatTimestamp()
     };
 
-    const message = await appendAiSection(baseMessage, 'segment_offline', aiContext);
-    return sendMessage(message);
+    const result = await sendMessage(baseMessage);
+    sendAiFollowup(result, 'segment_offline', aiContext);
+    return result;
 }
 
 /**

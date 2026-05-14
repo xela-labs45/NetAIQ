@@ -2,6 +2,7 @@ const db = require('../db/database');
 const { scanSegment } = require('../services/scanService');
 const telegramService = require('../services/telegramService');
 const alertService = require('../services/alertService');
+const notificationStateStore = require('../services/notificationStateStore');
 const criticalPingJob = require('./criticalPingJob'); // to check if it's executing
 
 let currentTimer = null;
@@ -9,6 +10,34 @@ let isRunning = false;
 let nextRunTime = null;
 // Map<segmentId, { since: number, telegramNotifiedAt: number|null, emailNotifiedAt: number|null }>
 let segmentZeroTracker = new Map();
+let segmentZeroTrackerHydrated = false;
+
+const SEGMENT_ENTITY_TYPE = 'segment';
+
+function hydrateSegmentTracker() {
+    if (segmentZeroTrackerHydrated) return;
+    for (const row of notificationStateStore.loadByType(SEGMENT_ENTITY_TYPE)) {
+        const id = parseInt(row.entity_key, 10);
+        if (Number.isNaN(id)) continue;
+        segmentZeroTracker.set(id, {
+            since: row.since,
+            telegramNotifiedAt: row.telegram_notified_at,
+            emailNotifiedAt: row.email_notified_at
+        });
+    }
+    segmentZeroTrackerHydrated = true;
+}
+
+function persistSegmentState(segmentId) {
+    const state = segmentZeroTracker.get(segmentId);
+    if (!state) return;
+    notificationStateStore.upsert(SEGMENT_ENTITY_TYPE, segmentId, {
+        since: state.since,
+        emailNotifiedAt: state.emailNotifiedAt,
+        telegramNotifiedAt: state.telegramNotifiedAt,
+        extra: null
+    });
+}
 
 function getGraceMs(channel) {
     const key = channel === 'email' ? 'email_offline_grace_minutes' : 'telegram_offline_grace_minutes';
@@ -23,7 +52,7 @@ function getInterval() {
 
 async function runScanCycle(fastify) {
     if (isRunning) return;
-    
+
     // Check if critical ping is running, if so, delay by 5 seconds
     if (criticalPingJob.getStatus && criticalPingJob.getStatus().isExecuting) {
         fastify.log.info('Segment scan delayed because critical ping scan is currently executing.');
@@ -31,6 +60,7 @@ async function runScanCycle(fastify) {
         return;
     }
 
+    hydrateSegmentTracker();
     isRunning = true;
     fastify.log.info('Running scheduled segment scan job...');
 
@@ -70,6 +100,7 @@ async function runScanCycle(fastify) {
                                 telegramNotifiedAt: null,
                                 emailNotifiedAt: null
                             });
+                            persistSegmentState(seg.id);
                         }
 
                         const state = segmentZeroTracker.get(seg.id);
@@ -78,6 +109,7 @@ async function runScanCycle(fastify) {
                             const tgGraceMs = getGraceMs('telegram');
                             if (now - state.since >= tgGraceMs) {
                                 state.telegramNotifiedAt = now;
+                                persistSegmentState(seg.id);
                                 fastify.log.warn(`Segment ${seg.id} offline (expected ${expectedDevices}, found 0). Sending Telegram alert.`);
                                 telegramService.sendSegmentOffline(segment, expectedDevices, hostsUp);
                             }
@@ -87,6 +119,7 @@ async function runScanCycle(fastify) {
                             const emailGraceMs = getGraceMs('email');
                             if (now - state.since >= emailGraceMs) {
                                 state.emailNotifiedAt = now;
+                                persistSegmentState(seg.id);
                                 const segEmailPref = db.prepare("SELECT value FROM settings WHERE key = 'email_alert_segment_offline'").get();
                                 if (segEmailPref?.value === '1') {
                                     fastify.log.warn(`Segment ${seg.id} offline. Sending email alert.`);
@@ -99,7 +132,10 @@ async function runScanCycle(fastify) {
                             }
                         }
                     } else if (hostsUp > 0) {
-                        segmentZeroTracker.delete(seg.id);
+                        if (segmentZeroTracker.has(seg.id)) {
+                            segmentZeroTracker.delete(seg.id);
+                            notificationStateStore.remove(SEGMENT_ENTITY_TYPE, seg.id);
+                        }
                     }
                 } catch (tgErr) {
                     fastify.log.error(`Segment ${seg.id} Telegram check error (non-blocking): ${tgErr.message}`);

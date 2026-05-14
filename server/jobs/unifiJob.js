@@ -3,6 +3,7 @@ const db = require('../db/database');
 const unifiService = require('../services/unifiService');
 const alertService = require('../services/alertService');
 const telegramService = require('../services/telegramService');
+const notificationStateStore = require('../services/notificationStateStore');
 const { harvestUnifiClients } = require('../services/discoveryService');
 
 let currentTask = null;
@@ -18,6 +19,40 @@ let previousDisconnected = 0;
 //   skipNotify: boolean  // true for APs that were already offline at server start
 // }>
 let apStateMap = new Map();
+let apStateMapHydrated = false;
+
+const AP_ENTITY_TYPE = 'ap';
+
+function hydrateApStateMap() {
+    if (apStateMapHydrated) return;
+    for (const row of notificationStateStore.loadByType(AP_ENTITY_TYPE)) {
+        const extra = row.extra || {};
+        apStateMap.set(row.entity_key, {
+            state: extra.state || 'disconnected',
+            since: row.since,
+            name: extra.name || row.entity_key,
+            telegramNotifiedAt: row.telegram_notified_at,
+            emailNotifiedAt: row.email_notified_at,
+            skipNotify: !!extra.skipNotify
+        });
+    }
+    apStateMapHydrated = true;
+}
+
+function persistApState(mac) {
+    const state = apStateMap.get(mac);
+    if (!state) return;
+    notificationStateStore.upsert(AP_ENTITY_TYPE, mac, {
+        since: state.since,
+        emailNotifiedAt: state.emailNotifiedAt,
+        telegramNotifiedAt: state.telegramNotifiedAt,
+        extra: {
+            state: state.state,
+            name: state.name,
+            skipNotify: state.skipNotify
+        }
+    });
+}
 
 function getGraceMs(channel) {
     const key = channel === 'email' ? 'email_offline_grace_minutes' : 'telegram_offline_grace_minutes';
@@ -51,6 +86,7 @@ module.exports = function (fastify) {
 
     currentTask = cron.schedule(cronExpression, async () => {
         fastify.log.info('Running scheduled UniFi cache job...');
+        hydrateApStateMap();
         try {
             // Background fetching to keep cache warm
             await unifiService.getClients();
@@ -131,6 +167,7 @@ module.exports = function (fastify) {
                                 emailNotifiedAt: null,
                                 skipNotify: !isConnected
                             });
+                            persistApState(mac);
                             continue;
                         }
 
@@ -145,6 +182,7 @@ module.exports = function (fastify) {
                                 emailNotifiedAt: null,
                                 skipNotify: false
                             });
+                            persistApState(mac);
                             // Fall through to grace period check below
                         }
 
@@ -155,6 +193,7 @@ module.exports = function (fastify) {
                                 const tgGraceMs = getGraceMs('telegram');
                                 if (now - currentState.since >= tgGraceMs) {
                                     currentState.telegramNotifiedAt = now;
+                                    persistApState(mac);
                                     telegramService.sendApOffline({
                                         name: currentState.name,
                                         mac,
@@ -167,6 +206,7 @@ module.exports = function (fastify) {
                                 const emailGraceMs = getGraceMs('email');
                                 if (now - currentState.since >= emailGraceMs) {
                                     currentState.emailNotifiedAt = now;
+                                    persistApState(mac);
                                     const emailPref = db.prepare("SELECT value FROM settings WHERE key = 'email_alert_ap_offline'").get();
                                     if (emailPref?.value === '1') {
                                         alertService.sendEmailAlert({
@@ -194,6 +234,7 @@ module.exports = function (fastify) {
                                 emailNotifiedAt: null,
                                 skipNotify: false
                             });
+                            persistApState(mac);
 
                             if (telegramWasNotified) {
                                 telegramService.sendApOnline({

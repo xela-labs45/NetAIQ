@@ -126,3 +126,13 @@ CREATE INDEX IF NOT EXISTS idx_ai_device_id ON ai_device_identifications(device_
 CREATE INDEX IF NOT EXISTS idx_ai_analysis_type ON ai_analysis_history(analysis_type);
 CREATE INDEX IF NOT EXISTS idx_ai_analysis_created ON ai_analysis_history(created_at);
 
+CREATE TABLE IF NOT EXISTS notification_state (
+  entity_type TEXT NOT NULL,
+  entity_key TEXT NOT NULL,
+  since INTEGER NOT NULL,
+  email_notified_at INTEGER,
+  telegram_notified_at INTEGER,
+  extra_json TEXT,
+  PRIMARY KEY (entity_type, entity_key)
+);
+
