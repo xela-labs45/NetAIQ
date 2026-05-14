@@ -1,11 +1,13 @@
 import React, { useState, useEffect } from 'react';
-import { Box, Snackbar, Alert } from '@mui/material';
+import { Box, Snackbar, Alert, AlertTitle } from '@mui/material';
 import { Outlet } from 'react-router-dom';
 import Sidebar from './Sidebar';
 import { useSocket } from '../hooks/useSocket';
+import { useAuth } from '../hooks/useAuth';
 
 export default function Layout() {
     const socket = useSocket();
+    const { warnings } = useAuth();
     const [toast, setToast] = useState({ open: false, message: '', severity: 'info' });
 
     const SIDEBAR_EXPANDED = 240;
@@ -63,6 +65,22 @@ export default function Layout() {
                     transition: 'all 0.25s cubic-bezier(0.4, 0, 0.2, 1)',
                 }}
             >
+                {warnings && warnings.length > 0 && warnings.map(w => (
+                    <Alert
+                        key={w.code}
+                        severity="warning"
+                        sx={{ mb: 2, borderRadius: 1 }}
+                    >
+                        <AlertTitle>Security Warning</AlertTitle>
+                        <strong>{w.message}</strong>
+                        <Box
+                            component="pre"
+                            sx={{ mt: 0.5, mb: 0, fontSize: '0.75rem', whiteSpace: 'pre-wrap', fontFamily: 'monospace' }}
+                        >
+                            {w.fix}
+                        </Box>
+                    </Alert>
+                ))}
                 <Outlet />
             </Box>
 

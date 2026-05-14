@@ -7,6 +7,7 @@ const AuthContext = createContext(null);
 
 export function AuthProvider({ children }) {
     const [user, setUser] = useState(null);
+    const [warnings, setWarnings] = useState([]);
     const [loading, setLoading] = useState(true);
     const navigate = useNavigate();
     const queryClient = useQueryClient();
@@ -16,6 +17,7 @@ export function AuthProvider({ children }) {
         axios.get('/api/v1/auth/me')
             .then(res => {
                 setUser(res.data.user);
+                setWarnings(res.data.warnings || []);
             })
             .catch(() => {
                 setUser(null);
@@ -31,6 +33,7 @@ export function AuthProvider({ children }) {
         // Automatically fetch user info right after a successful login
         const meRes = await axios.get('/api/v1/auth/me');
         setUser(meRes.data.user);
+        setWarnings(meRes.data.warnings || []);
 
         if (res.data.must_change_password) {
             navigate('/change-password');
@@ -48,7 +51,7 @@ export function AuthProvider({ children }) {
     };
 
     return (
-        <AuthContext.Provider value={{ user, login, logout, loading, setUser }}>
+        <AuthContext.Provider value={{ user, warnings, login, logout, loading, setUser }}>
             {children}
         </AuthContext.Provider>
     );

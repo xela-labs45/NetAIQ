@@ -20,6 +20,38 @@ if (missing.length > 0) {
   process.exit(1);
 }
 
+const KNOWN_WEAK_SECRETS = [
+  'replace_with_a_random_64_character_string',
+  'supersecretkeyreplace_with_a_random_64_character_string',
+];
+const jwtSecret = process.env.JWT_SECRET || '';
+const isWeakSecret =
+  KNOWN_WEAK_SECRETS.includes(jwtSecret) ||
+  jwtSecret.length < 32;
+
+if (isWeakSecret) {
+  console.error('');
+  console.error('╔══════════════════════════════════════════════════════════════╗');
+  console.error('║              ⚠  SECURITY WARNING  ⚠                         ║');
+  console.error('╠══════════════════════════════════════════════════════════════╣');
+  console.error('║  JWT_SECRET in your .env file is weak or still set to the   ║');
+  console.error('║  default placeholder value.                                  ║');
+  console.error('║                                                              ║');
+  console.error('║  Anyone who knows this value can forge authentication        ║');
+  console.error('║  tokens and log in as any user without a password.           ║');
+  console.error('║                                                              ║');
+  console.error('║  HOW TO FIX:                                                 ║');
+  console.error('║  1. Run:  openssl rand -hex 64                               ║');
+  console.error('║  2. Copy the output into your .env file:                     ║');
+  console.error('║     JWT_SECRET=<paste generated value here>                  ║');
+  console.error('║  3. Restart the server.                                      ║');
+  console.error('║                                                              ║');
+  console.error('║  The server will continue running, but you should fix this   ║');
+  console.error('║  before exposing the app to any network.                     ║');
+  console.error('╚══════════════════════════════════════════════════════════════╝');
+  console.error('');
+}
+
 // Register plugins
 // In production, CORS is disabled (origin: false) because Caddy serves both
 // frontend and API from the same origin. If deployed without a reverse proxy,

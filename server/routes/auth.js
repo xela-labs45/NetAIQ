@@ -102,6 +102,21 @@ module.exports = async function (fastify, opts) {
         if (!user) {
             return reply.code(401).send({ error: true, message: 'User not found' });
         }
-        reply.send({ user });
+
+        const KNOWN_WEAK_SECRETS = [
+            'replace_with_a_random_64_character_string',
+            'supersecretkeyreplace_with_a_random_64_character_string',
+        ];
+        const jwtSecret = process.env.JWT_SECRET || '';
+        const warnings = [];
+        if (KNOWN_WEAK_SECRETS.includes(jwtSecret) || jwtSecret.length < 32) {
+            warnings.push({
+                code: 'WEAK_JWT_SECRET',
+                message: 'JWT_SECRET is set to the default placeholder value. Anyone can forge login tokens.',
+                fix: 'Run: openssl rand -hex 64  — paste the output as JWT_SECRET in your .env file, then restart the server.',
+            });
+        }
+
+        reply.send({ user, warnings });
     });
 };
