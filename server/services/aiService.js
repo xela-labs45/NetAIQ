@@ -386,8 +386,16 @@ async function identifyDevice(deviceId) {
 
   // Step 1 — OUI lookup (free, instant).
   // Short-circuit for high/medium confidence AND for randomised MACs (AI cannot help).
+  // Exception: a medium-confidence hit with no device_type (mainly Apple, where the
+  // manufacturer is known but iPhone-vs-Mac needs hostname context) should fall
+  // through to AI so it can disambiguate using the hostname.
   const ouiResult = lookupMac(device.mac_address);
-  if (ouiResult && (ouiResult.confidence === 'high' || ouiResult.confidence === 'medium' || ouiResult.isRandomised)) {
+  const ouiResolved = ouiResult && (
+    ouiResult.confidence === 'high' ||
+    (ouiResult.confidence === 'medium' && ouiResult.device_type) ||
+    ouiResult.isRandomised
+  );
+  if (ouiResolved) {
     const provider = ouiResult.source === 'oui_ieee' ? 'oui_ieee' : 'oui_lookup';
     const result = {
       device_type_suggestion: ouiResult.device_type,
@@ -468,11 +476,16 @@ Return this exact JSON:
 }
 
 function saveIdentification(deviceId, mac, result, raw, provider, model) {
+  // Normalise once so DELETE, INSERT, and the discovered_devices UPDATE all
+  // key on the same canonical (lowercase, colon-separated) form. Without this,
+  // an uppercase or unseparated MAC would skip the DELETE and leave duplicate
+  // identification rows behind.
+  const cleanMac = mac ? normaliseMac(mac) : null;
   const transaction = db.transaction(() => {
     if (deviceId !== null) {
       db.prepare(`DELETE FROM ai_device_identifications WHERE device_id = ? `).run(deviceId);
-    } else {
-      db.prepare(`DELETE FROM ai_device_identifications WHERE mac_address = ? AND device_id IS NULL`).run(mac);
+    } else if (cleanMac) {
+      db.prepare(`DELETE FROM ai_device_identifications WHERE mac_address = ? AND device_id IS NULL`).run(cleanMac);
     }
 
     db.prepare(`
@@ -481,18 +494,14 @@ function saveIdentification(deviceId, mac, result, raw, provider, model) {
                 confidence, reasoning, suggested_name, raw_response, provider, model)
         VALUES(?,?,?,?,?,?,?,?,?,?,?,?)
             `).run(
-      deviceId, mac,
+      deviceId, cleanMac,
       result.device_type_suggestion, result.manufacturer, result.os_guess,
       result.owner_type, result.confidence, result.reasoning,
       result.suggested_name, raw, provider, model
     );
 
-    // Flag it in discovered_devices registry
-    if (mac) {
-      const cleanMac = normaliseMac(mac);
-      if (cleanMac) {
-        db.prepare('UPDATE discovered_devices SET ai_identified = 1 WHERE mac_address = ?').run(cleanMac);
-      }
+    if (cleanMac) {
+      db.prepare('UPDATE discovered_devices SET ai_identified = 1 WHERE mac_address = ?').run(cleanMac);
     }
   });
   transaction();
@@ -520,8 +529,16 @@ async function identifyDiscoveredDevice(mac) {
   if (!discovered) return null;
 
   // OUI lookup first — short-circuit for high/medium confidence AND randomised MACs.
+  // Exception: a medium-confidence hit with no device_type (mainly Apple, where the
+  // manufacturer is known but iPhone-vs-Mac needs hostname context) should fall
+  // through to AI so it can disambiguate using the hostname.
   const ouiResult = lookupMac(cleanMac);
-  if (ouiResult && (ouiResult.confidence === 'high' || ouiResult.confidence === 'medium' || ouiResult.isRandomised)) {
+  const ouiResolved = ouiResult && (
+    ouiResult.confidence === 'high' ||
+    (ouiResult.confidence === 'medium' && ouiResult.device_type) ||
+    ouiResult.isRandomised
+  );
+  if (ouiResolved) {
     const result = {
       device_type_suggestion: ouiResult.device_type,
       manufacturer: ouiResult.manufacturer,

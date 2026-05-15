@@ -1265,8 +1265,12 @@ const MANUFACTURER_INFERENCE = [
     { keywords: ['amazon'],                     device_type: 'other',          os_guess: 'Fire OS' },
     // Laptops / workstations
     { keywords: ['dell'],                       device_type: 'windows_laptop', os_guess: 'Windows' },
-    { keywords: ['hewlett-packard'],            device_type: 'printer',        os_guess: null },
-    { keywords: ['hewlett packard', 'hp inc'],  device_type: 'windows_laptop', os_guess: 'Windows' },
+    // HP printer OUIs are covered by the hand-curated map (Tier 1). At Tier 2,
+    // 'Hewlett-Packard' assignments span laptops, servers, and network gear, so
+    // defaulting all of them to 'printer' produces a large false-positive set.
+    // HPE must precede the laptop rule so 'Hewlett Packard Enterprise' lands on 'server'.
+    { keywords: ['hp enterprise', 'hewlett packard enterprise', 'hpe'], device_type: 'server', os_guess: null },
+    { keywords: ['hewlett-packard', 'hewlett packard', 'hp inc'],  device_type: 'windows_laptop', os_guess: 'Windows' },
     { keywords: ['lenovo'],                     device_type: 'windows_laptop', os_guess: 'Windows' },
     { keywords: ['asus'],                       device_type: 'workstation',    os_guess: 'Windows' },
     { keywords: ['acer'],                       device_type: 'windows_laptop', os_guess: 'Windows' },
@@ -1316,7 +1320,6 @@ const MANUFACTURER_INFERENCE = [
     // Servers / hypervisors
     { keywords: ['vmware'],                     device_type: 'server',         os_guess: 'VMware ESXi' },
     { keywords: ['supermicro'],                 device_type: 'server',         os_guess: null },
-    { keywords: ['hpe', 'hp enterprise'],       device_type: 'server',         os_guess: null },
 ];
 
 function inferFromManufacturer(manufacturer) {
@@ -1387,9 +1390,11 @@ function normaliseDeviceType(device_type, os_guess) {
 function lookupMac(macAddress) {
     if (!macAddress || typeof macAddress !== 'string') return null;
 
-    // Validate MAC format to prevent processing garbage strings
+    // Validate MAC format to prevent processing garbage strings.
+    // Require exactly 12 hex chars — anything shorter risks false MA-M matches
+    // (a 7-char input would slice to itself and could match an MA-M assignment).
     const cleanMac = macAddress.replace(/[^a-fA-F0-9]/g, '');
-    if (cleanMac.length < 6) return null;
+    if (cleanMac.length !== 12) return null;
 
     // Handle randomised/locally-administered MACs first.
     // AI cannot identify these — caller must short-circuit on isRandomised rather than calling AI.
