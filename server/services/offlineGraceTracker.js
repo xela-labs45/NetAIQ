@@ -2,26 +2,43 @@ const db = require('../db/database');
 const store = require('./notificationStateStore');
 
 // Map<entityKey, { since: number, telegramNotifiedAt: number|null, emailNotifiedAt: number|null }>
-// entityKey format: `device:${id}`
+//
+// entityKey is a prefixed string: `device:${id}` or `segment:${id}`. The
+// prefix is the entity type used in `notification_state.entity_type`. The
+// UniFi AP tracker (unifiJob.js) has a more complex state machine and keeps
+// its own Map — it imports `getGraceMs` from here but not the rest.
 const tracker = new Map();
 
-const ENTITY_TYPE = 'device';
+// Types this tracker is responsible for.
+const MANAGED_TYPES = ['device', 'segment'];
+
+function entityTypeOf(entityKey) {
+    const colonIdx = entityKey.indexOf(':');
+    if (colonIdx <= 0) {
+        throw new Error(`offlineGraceTracker: entityKey must be of the form 'type:id', got '${entityKey}'`);
+    }
+    return entityKey.slice(0, colonIdx);
+}
 
 // Rehydrate from DB on module load so notifications survive server restarts.
 // better-sqlite3 + database.js initialise synchronously, so by the time this
 // module is required the `notification_state` table is guaranteed to exist.
-for (const row of store.loadByType(ENTITY_TYPE)) {
-    tracker.set(row.entity_key, {
-        since: row.since,
-        emailNotifiedAt: row.email_notified_at,
-        telegramNotifiedAt: row.telegram_notified_at
-    });
+for (const type of MANAGED_TYPES) {
+    for (const row of store.loadByType(type)) {
+        tracker.set(`${type}:${row.entity_key}`, {
+            since: row.since,
+            emailNotifiedAt: row.email_notified_at,
+            telegramNotifiedAt: row.telegram_notified_at
+        });
+    }
 }
 
 function persist(entityKey) {
     const state = tracker.get(entityKey);
     if (!state) return;
-    store.upsert(ENTITY_TYPE, entityKey, {
+    const type = entityTypeOf(entityKey);
+    const id = entityKey.slice(type.length + 1);
+    store.upsert(type, id, {
         since: state.since,
         emailNotifiedAt: state.emailNotifiedAt,
         telegramNotifiedAt: state.telegramNotifiedAt,
@@ -47,7 +64,9 @@ function markOffline(entityKey) {
 function markOnline(entityKey) {
     const state = tracker.get(entityKey);
     tracker.delete(entityKey);
-    store.remove(ENTITY_TYPE, entityKey);
+    const type = entityTypeOf(entityKey);
+    const id = entityKey.slice(type.length + 1);
+    store.remove(type, id);
     return state;
 }
 

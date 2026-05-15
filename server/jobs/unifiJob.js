@@ -4,6 +4,7 @@ const unifiService = require('../services/unifiService');
 const alertService = require('../services/alertService');
 const telegramService = require('../services/telegramService');
 const notificationStateStore = require('../services/notificationStateStore');
+const { getGraceMs } = require('../services/offlineGraceTracker');
 const { harvestUnifiClients } = require('../services/discoveryService');
 
 let currentTask = null;
@@ -52,12 +53,6 @@ function persistApState(mac) {
             skipNotify: state.skipNotify
         }
     });
-}
-
-function getGraceMs(channel) {
-    const key = channel === 'email' ? 'email_offline_grace_minutes' : 'telegram_offline_grace_minutes';
-    const row = db.prepare('SELECT value FROM settings WHERE key = ?').get(key);
-    return Math.max(0, parseInt(row?.value || '0', 10)) * 60 * 1000;
 }
 
 module.exports = function (fastify) {
