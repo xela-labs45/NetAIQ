@@ -122,7 +122,7 @@ internal long-polling loop (`getUpdates`) started on server boot and restarted b
 configured chat ID only.
 
 Supported chat commands: `/status`, `/online`, `/offline`, `/critical`,
-`/alerts`, `/alerts all`, `/aps`, `/segments`, `/markread`, `/help`.
+`/alerts`, `/alerts_all`, `/aps`, `/segments`, `/markread`, `/help`.
 
 ## Errors
 

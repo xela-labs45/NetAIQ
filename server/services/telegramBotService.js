@@ -337,7 +337,7 @@ async function cmdHelp() {
         '/offline — Offline devices only',
         '/critical — Critical devices + escalating polls',
         '/alerts — Last 10 unread alerts',
-        '/alerts all — Last 20 alerts (all)',
+        '/alerts_all — Last 20 alerts (all)',
         '/aps — UniFi access point health',
         '/segments — Network segments summary',
         '',
@@ -357,6 +357,9 @@ const COMMANDS = {
     offline: cmdOffline,
     critical: cmdCritical,
     alerts: cmdAlerts,
+    // Telegram commands are single tokens (no spaces), so /alerts_all is the
+    // canonical "all alerts" command. "/alerts all" still works via arg parsing.
+    alerts_all: () => cmdAlerts({ args: ['all'] }),
     aps: cmdAps,
     segments: cmdSegments,
     markread: cmdMarkread,

@@ -26,7 +26,7 @@
 - 📈 **Bandwidth Insights** — Top-talker view and per-period WAN throughput charts sourced from UniFi reports
 - 📧 **Automated Alerting** — Configurable email alerts (SMTP) for device events and high latency
 - 📲 **Telegram Notifications** — Real-time bot alerts for critical device offline/online, AP status changes, and segment outages
-- 🤖 **Two-Way Telegram Bot** — Query live network state on demand (`/status`, `/online`, `/offline`, `/critical`, `/alerts`, `/aps`, `/segments`, `/markread`) with chat-ID-whitelisted command access
+- 🤖 **Two-Way Telegram Bot** — Query live network state on demand (`/status`, `/online`, `/offline`, `/critical`, `/alerts`, `/alerts_all`, `/aps`, `/segments`, `/markread`) with chat-ID-whitelisted command access
 - 🤖 **AI Insights** — Automated device identification (OUI + AI), 24h anomaly detection, and alert triage via Anthropic or OpenRouter
 - 🧹 **Automated Data Maintenance** — Configurable background jobs for ping history and alert data retention
 - 🔐 **Hardened Security** — Unified JWT authentication (Socket.IO + API), login rate limiting, atomic scan locking, and hidden production stack traces
@@ -340,7 +340,7 @@ state. This is opt-in and independent of the outbound alert toggles.
 | `/offline` | Offline devices, longest-offline first |
 | `/critical` | Critical-flagged devices + any active escalating polls |
 | `/alerts` | Last 10 unread alerts |
-| `/alerts all` | Last 20 alerts regardless of read state |
+| `/alerts_all` | Last 20 alerts regardless of read state (`/alerts all` also works) |
 | `/aps` | UniFi access point health (degrades gracefully if UniFi is unconfigured) |
 | `/segments` | Configured segments with device counts and last-scan age |
 | `/markread` | Mark all unread alerts as read |
