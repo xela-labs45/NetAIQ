@@ -210,6 +210,12 @@ module.exports = async function (fastify, opts) {
             delete body.telegram_bot_token;
         }
         saveSettings(body);
+
+        // Restart inbound bot polling so token/chat-ID/commands-enabled changes
+        // take effect without a server restart (mirrors restartAiJobs).
+        const { restartBotPolling } = require('../services/telegramBotService');
+        restartBotPolling(fastify);
+
         reply.send({ success: true });
     });
 

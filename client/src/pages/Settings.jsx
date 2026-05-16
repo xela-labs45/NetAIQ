@@ -64,7 +64,7 @@ export default function Settings() {
     });
 
     const [telegram, setTelegram] = useState({
-        telegram_bot_token: '', telegram_chat_id: '', telegram_alerts_enabled: false, telegram_ai_enhanced: false,
+        telegram_bot_token: '', telegram_chat_id: '', telegram_alerts_enabled: false, telegram_commands_enabled: false, telegram_ai_enhanced: false,
         telegram_alert_critical_offline: true, telegram_alert_critical_online: true,
         telegram_alert_ap_offline: true, telegram_alert_ap_online: true,
         telegram_alert_segment_offline: true,
@@ -161,6 +161,7 @@ export default function Settings() {
             telegram_bot_token: s.telegram_bot_token || '',
             telegram_chat_id: s.telegram_chat_id || '',
             telegram_alerts_enabled: s.telegram_alerts_enabled === '1',
+            telegram_commands_enabled: s.telegram_commands_enabled === '1',
             telegram_ai_enhanced: s.telegram_ai_enhanced === '1',
             telegram_alert_critical_offline: s.telegram_alert_critical_offline !== '0',
             telegram_alert_critical_online: s.telegram_alert_critical_online !== '0',
@@ -676,6 +677,17 @@ export default function Settings() {
                                 </Grid>
                             )}
                         </Grid>
+
+                        {/* Two-way bot commands — independent of outbound alerts */}
+                        <Box sx={{ mt: 3, p: 2.5, bgcolor: 'rgba(255,255,255,0.03)', borderRadius: 1, border: '1px solid rgba(255,255,255,0.08)' }}>
+                            <FormControlLabel
+                                control={<Switch checked={telegram.telegram_commands_enabled} onChange={(e) => setTelegram({ ...telegram, telegram_commands_enabled: e.target.checked })} color="primary" />}
+                                label="Enable Bot Commands (two-way)"
+                            />
+                            <Typography variant="body2" color="text.secondary" sx={{ ml: 5.8, mt: -0.5 }}>
+                                Allow the bot to receive and respond to commands from the configured chat ID.
+                            </Typography>
+                        </Box>
 
                         {/* Per-event toggles — only visible when Telegram is enabled */}
                         {telegram.telegram_alerts_enabled && (

@@ -1,0 +1,494 @@
+/**
+ * Telegram Bot — Inbound Command Handler (two-way)
+ * ================================================
+ *
+ * NetAIQ's Telegram integration is otherwise outbound-only (see telegramService.js
+ * which pushes alerts). This module adds the *inbound* half: it lets an authorised
+ * operator query live network state by messaging the bot.
+ *
+ * Architecture
+ * ------------
+ *  - **Long polling**, not webhooks. SMB self-hosted deployments rarely have an
+ *    externally reachable URL, so we pull updates from Telegram's `getUpdates`
+ *    endpoint instead of receiving pushes. No inbound port, no public DNS needed.
+ *  - A single recursive `setTimeout` loop (NOT setInterval) ticks every POLL_MS.
+ *    Recursion guarantees one tick never overlaps the next even if a tick runs long.
+ *  - The `update_id` offset is kept **in memory only**. Polling cursor state is not
+ *    worth persisting — on restart we simply resume from Telegram's backlog and the
+ *    chat-ID whitelist + command idempotency make reprocessing harmless.
+ *  - The entire tick body is wrapped in try/catch. Network blips are logged and
+ *    retried on the next tick; nothing in here may ever crash the server.
+ *  - Auth is a single chat-ID whitelist (`telegram_chat_id`). That is the only
+ *    auth mechanism — deliberately simple, sufficient for SMB self-hosted.
+ *
+ * Adding a new command
+ * --------------------
+ *  1. Write an `async function cmdFoo(ctx)` handler. `ctx` gives you `{ args }`.
+ *     Return the reply string (HTML). Throwing is safe — it's caught and turned
+ *     into a generic error reply; never let internal details reach the chat.
+ *  2. Register it in the COMMANDS map below: `foo: cmdFoo`.
+ *  3. Add a line to `cmdHelp` so it shows up in /help.
+ * All DB reads use the existing synchronous better-sqlite3 API. Do not trigger
+ * scans or external API calls from a handler unless the command explicitly is
+ * about that subsystem (e.g. /aps) — keep replies fast.
+ *
+ * Uses Node 18+ built-in fetch(); no extra npm packages.
+ */
+
+const db = require('../db/database');
+const telegramService = require('./telegramService');
+const unifiService = require('./unifiService');
+const alertService = require('./alertService');
+const escalatingPollManager = require('./EscalatingPollManager');
+const { formatInUserTimezone } = require('../utils/dateFormatter');
+const { version: APP_VERSION } = require('../../package.json');
+
+const { escapeHtml, formatDowntime, validateBotToken, validateChatId } = telegramService;
+
+const POLL_MS = 2000;          // loop cadence
+const HTTP_TIMEOUT_MS = 10000; // per Telegram API call
+
+// ─── In-memory polling state (intentionally not persisted) ──────────
+let pollTimer = null;
+let updateOffset = 0;
+let running = false;
+
+// ─── Telegram API helpers ───────────────────────────────────────────
+
+async function tgApi(token, method, payload) {
+    const url = `https://api.telegram.org/bot${token}/${method}`;
+    const response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+        signal: AbortSignal.timeout(HTTP_TIMEOUT_MS)
+    });
+    return response.json();
+}
+
+async function sendReply(token, chatId, text) {
+    try {
+        const data = await tgApi(token, 'sendMessage', {
+            chat_id: chatId,
+            text,
+            parse_mode: 'HTML',
+            disable_web_page_preview: true
+        });
+        if (!data.ok) {
+            console.error('[TelegramBot] sendMessage rejected:', data.description || JSON.stringify(data));
+        }
+        return data;
+    } catch (err) {
+        console.error('[TelegramBot] sendMessage failed:', err.message);
+        return { ok: false, description: err.message };
+    }
+}
+
+function maskChatId(chatId) {
+    const s = String(chatId);
+    return s.length <= 4 ? s : '***' + s.slice(-4);
+}
+
+// ─── Time / formatting helpers ──────────────────────────────────────
+
+// SQLite stores timestamps as UTC 'YYYY-MM-DD HH:MM:SS' (no zone). Parse explicitly.
+function sqliteToMs(ts) {
+    if (!ts) return null;
+    const ms = new Date(String(ts).replace(' ', 'T') + 'Z').getTime();
+    return Number.isNaN(ms) ? null : ms;
+}
+
+// "HH:MM" in the user's configured timezone. formatInUserTimezone → "DD-MM-YYYY HH:MM:SS".
+function clock(date) {
+    const full = formatInUserTimezone(date);
+    return full.length >= 16 ? full.slice(11, 16) : full;
+}
+
+function agoText(ms) {
+    if (ms == null) return 'unknown';
+    const mins = Math.max(0, Math.round((Date.now() - ms) / 60000));
+    if (mins < 1) return 'just now';
+    if (mins < 60) return `${mins}m ago`;
+    const h = Math.floor(mins / 60);
+    const m = mins % 60;
+    return m ? `${h}h ${m}m ago` : `${h}h ago`;
+}
+
+function nextRunText(status, unit /* 's' | 'm' */) {
+    if (!status || !status.nextRunExpectedAt) return status?.isExecuting ? 'running now' : 'unknown';
+    if (status.isExecuting) return 'running now';
+    const secs = Math.round((status.nextRunExpectedAt - Date.now()) / 1000);
+    if (secs <= 0) return 'imminent';
+    return unit === 'm' ? `${Math.max(1, Math.round(secs / 60))}m` : `${secs}s`;
+}
+
+const SEVERITY_ICON = { critical: '🔴', warning: '🟡', info: '🟢' };
+function sevIcon(sev) { return SEVERITY_ICON[String(sev).toLowerCase()] || '⚪️'; }
+
+// Latency-tiered status icon for an online/offline device row.
+function deviceIcon(status, latency) {
+    if (status !== 'up') return '🔴';
+    if (latency != null && latency > 100) return '🟡';
+    return '🟢';
+}
+
+function name(d) {
+    return escapeHtml(d.hostname || d.ip_address || 'unknown');
+}
+
+// ─── Device-state query (shared by /status /online /offline /critical) ──
+
+// Latest ping per device + the most recent 'up' timestamp (for offline duration).
+function getDeviceStates(where = '') {
+    return db.prepare(`
+        SELECT d.id, d.hostname, d.ip_address, d.is_critical, d.segment_id, d.created_at,
+               p.status   AS status,
+               p.latency_ms AS latency_ms,
+               p.timestamp  AS last_ping,
+               (SELECT MAX(timestamp) FROM ping_history
+                  WHERE device_id = d.id AND status = 'up') AS last_up
+        FROM devices d
+        LEFT JOIN ping_history p
+          ON p.id = (SELECT id FROM ping_history
+                       WHERE device_id = d.id
+                       ORDER BY timestamp DESC LIMIT 1)
+        ${where}
+    `).all();
+}
+
+function offlineMs(d) {
+    const ref = sqliteToMs(d.last_up) ?? sqliteToMs(d.created_at);
+    return ref == null ? null : Date.now() - ref;
+}
+
+// ─── Command handlers ───────────────────────────────────────────────
+
+async function cmdStatus() {
+    const devices = getDeviceStates();
+    const total = devices.length;
+    const online = devices.filter(d => d.status === 'up');
+    const offline = devices.filter(d => d.status !== 'up');
+    const offlineNames = offline.slice(0, 3).map(name).join(', ');
+
+    const counts = alertService.getUnreadCount();
+
+    const lines = [
+        '🌐 <b>NetAIQ Status</b>',
+        `📡 Devices: ${online.length} online / ${total} tracked`,
+        `🔴 Offline: ${offline.length} (${offline.length ? offlineNames + (offline.length > 3 ? ', …' : '') : 'none'})`,
+        `🔔 Alerts: ${counts.unread_count} unread (${counts.critical_count} critical)`,
+    ];
+
+    // AP line only if UniFi is configured & reachable — degrade silently otherwise.
+    try {
+        const wlan = await unifiService.getWlanHealth();
+        if (wlan) {
+            lines.push(`📶 APs: ${wlan.num_ap} total, ${wlan.num_disconnected} down | ${wlan.num_user} clients`);
+        }
+    } catch (_) { /* omit AP line on failure */ }
+
+    const cp = require('../jobs/criticalPingJob').getStatus();
+    const sj = require('../jobs/scanJob').getStatus();
+    lines.push(`⏱ Critical poll: next in ${nextRunText(cp, 's')} | Segment scan: next in ${nextRunText(sj, 'm')}`);
+
+    return lines.join('\n');
+}
+
+async function cmdOnline() {
+    const rows = getDeviceStates("WHERE 1=1")
+        .filter(d => d.status === 'up')
+        .sort((a, b) => (a.latency_ms ?? 1e9) - (b.latency_ms ?? 1e9));
+
+    if (!rows.length) return '✅ <b>Online Devices (0)</b>\nNo devices are currently online.';
+
+    const body = rows.map(d => {
+        const lat = d.latency_ms != null ? `${Math.round(d.latency_ms)}ms` : 'n/a';
+        return `${deviceIcon(d.status, d.latency_ms)} ${name(d)} — ${escapeHtml(d.ip_address)} (${lat})`;
+    });
+    return [`✅ <b>Online Devices (${rows.length})</b>`, ...body].join('\n');
+}
+
+async function cmdOffline() {
+    const rows = getDeviceStates()
+        .filter(d => d.status !== 'up')
+        .map(d => ({ d, off: offlineMs(d) }))
+        .sort((a, b) => (b.off ?? 0) - (a.off ?? 0)); // longest offline first
+
+    if (!rows.length) return '✅ All tracked devices are online.';
+
+    const body = rows.map(({ d, off }) =>
+        `🔴 ${name(d)} — ${escapeHtml(d.ip_address)} (offline ${formatDowntime(off)})`);
+    return [`❌ <b>Offline Devices (${rows.length})</b>`, ...body].join('\n');
+}
+
+async function cmdCritical() {
+    const rows = getDeviceStates('WHERE d.is_critical = 1');
+    const escalating = escalatingPollManager.getEscalatingStatus();
+    const escById = new Map(escalating.map(e => [e.deviceId, e]));
+
+    if (!rows.length) return '⚠️ <b>Critical Devices (0)</b>\nNo devices are flagged critical.';
+
+    const body = rows.map(d => {
+        const esc = escById.get(d.id);
+        if (esc) {
+            return `🔴 ${name(d)} — ${escapeHtml(d.ip_address)} (offline ${formatDowntime(offlineMs(d))}) [escalating: attempt ${esc.attempts}/${esc.max}]`;
+        }
+        if (d.status === 'up') {
+            const lat = d.latency_ms != null ? `${Math.round(d.latency_ms)}ms` : 'n/a';
+            return `${deviceIcon(d.status, d.latency_ms)} ${name(d)} — ${escapeHtml(d.ip_address)} (${lat}) [critical]`;
+        }
+        return `🔴 ${name(d)} — ${escapeHtml(d.ip_address)} (offline ${formatDowntime(offlineMs(d))}) [critical]`;
+    });
+
+    body.push(`Escalating polls active: ${escalating.length}`);
+    return [`⚠️ <b>Critical Devices (${rows.length})</b>`, ...body].join('\n');
+}
+
+function renderAlerts(rows, header, { showRead = false } = {}) {
+    if (!rows.length) return `🔔 <b>${header}</b>\nNothing to show.`;
+    const body = rows.map(a => {
+        const who = a.hostname || a.ip_address;
+        const subject = who ? `${escapeHtml(who)}: ` : '';
+        const sev = String(a.severity || '').toUpperCase();
+        const readTag = showRead && a.is_read ? ' [read]' : '';
+        return `${sevIcon(a.severity)} [${clock(a.created_at)}] ${subject}${escapeHtml(a.message)} — ${sev}${readTag}`;
+    });
+    return [`🔔 <b>${header}</b>`, ...body].join('\n');
+}
+
+async function cmdAlerts(ctx) {
+    const all = (ctx.args[0] || '').toLowerCase() === 'all';
+    if (all) {
+        const rows = db.prepare(`
+            SELECT a.id, a.message, a.severity, a.is_read, a.created_at,
+                   d.hostname, d.ip_address
+            FROM alerts a LEFT JOIN devices d ON d.id = a.device_id
+            ORDER BY a.created_at DESC LIMIT 20
+        `).all();
+        return renderAlerts(rows, `Alerts — last ${rows.length} (all)`, { showRead: true });
+    }
+    const rows = db.prepare(`
+        SELECT a.id, a.message, a.severity, a.is_read, a.created_at,
+               d.hostname, d.ip_address
+        FROM alerts a LEFT JOIN devices d ON d.id = a.device_id
+        WHERE a.is_read = 0
+        ORDER BY a.created_at DESC LIMIT 10
+    `).all();
+    const out = renderAlerts(rows, `Unread Alerts (${rows.length})`);
+    return rows.length ? out + '\n\nSend /markread to clear all.' : '✅ No unread alerts.';
+}
+
+async function cmdAps() {
+    let resp;
+    try {
+        resp = await unifiService.getDevices();
+    } catch (_) {
+        return '📶 UniFi unreachable — could not fetch access points.';
+    }
+    if (!resp) return '📶 UniFi not configured.';
+
+    const list = (resp.data || resp || []).filter(x => x && x.type === 'uap');
+    if (!list.length) return '📶 <b>Access Points (0)</b>\nNo access points reported by UniFi.';
+
+    const body = list.map(ap => {
+        const apName = escapeHtml(ap.name || ap.mac || 'Unknown AP');
+        if (ap.state === 1) {
+            const tx = ((ap['tx_bytes-r'] || 0) * 8 / 1e6).toFixed(1);
+            const rx = ((ap['rx_bytes-r'] || 0) * 8 / 1e6).toFixed(1);
+            const clients = ap['num_sta'] ?? ap.user_num_sta ?? 0;
+            return `🟢 ${apName} — ${clients} clients | ↑${tx} ↓${rx} Mbps`;
+        }
+        const seen = ap.last_seen ? ` (last seen ${agoText(ap.last_seen * 1000)})` : '';
+        return `🔴 ${apName} — offline${seen}`;
+    });
+    return [`📶 <b>Access Points (${list.length})</b>`, ...body].join('\n');
+}
+
+async function cmdSegments() {
+    const rows = db.prepare(`
+        SELECT s.id, s.name, s.cidr,
+               (SELECT COUNT(*) FROM devices d WHERE d.segment_id = s.id) AS device_count,
+               (SELECT MAX(scanned_at) FROM scan_results sr WHERE sr.segment_id = s.id) AS last_scan
+        FROM segments s
+        ORDER BY s.name
+    `).all();
+
+    if (!rows.length) return '🗺 <b>Network Segments (0)</b>\nNo segments configured.';
+
+    const body = rows.map(s => {
+        const scan = s.last_scan ? `last scan ${agoText(sqliteToMs(s.last_scan))}` : 'never scanned';
+        return `${escapeHtml(s.name)} (${escapeHtml(s.cidr)}) — ${s.device_count} devices, ${scan}`;
+    });
+    return [`🗺 <b>Network Segments (${rows.length})</b>`, '', ...body].join('\n');
+}
+
+async function cmdMarkread() {
+    const info = db.prepare('UPDATE alerts SET is_read = 1 WHERE is_read = 0').run();
+    return `✅ Marked ${info.changes} alert${info.changes === 1 ? '' : 's'} as read.`;
+}
+
+async function cmdHelp() {
+    return [
+        '🤖 <b>NetAIQ Bot Commands</b>',
+        '',
+        '<b>📊 Status &amp; Info</b>',
+        '/status — Network health snapshot',
+        '/online — Online devices only',
+        '/offline — Offline devices only',
+        '/critical — Critical devices + escalating polls',
+        '/alerts — Last 10 unread alerts',
+        '/alerts all — Last 20 alerts (all)',
+        '/aps — UniFi access point health',
+        '/segments — Network segments summary',
+        '',
+        '<b>⚡ Actions</b>',
+        '/markread — Mark all alerts as read',
+        '',
+        '<b>ℹ️ Info</b>',
+        '/help — This message',
+        '',
+        `NetAIQ v${escapeHtml(APP_VERSION)} | ${formatInUserTimezone(new Date())}`,
+    ].join('\n');
+}
+
+const COMMANDS = {
+    status: cmdStatus,
+    online: cmdOnline,
+    offline: cmdOffline,
+    critical: cmdCritical,
+    alerts: cmdAlerts,
+    aps: cmdAps,
+    segments: cmdSegments,
+    markread: cmdMarkread,
+    help: cmdHelp,
+};
+
+// ─── Update handling ────────────────────────────────────────────────
+
+async function handleUpdate(update, token, expectedChatId) {
+    const msg = update.message;
+    if (!msg || typeof msg.text !== 'string') return; // ignore non-text updates silently
+
+    const chatId = msg.chat && msg.chat.id;
+    if (chatId == null) return;
+
+    // Auth: single chat-ID whitelist.
+    if (!expectedChatId) {
+        console.warn('[TelegramBot] telegram_chat_id not configured — ignoring all updates');
+        return;
+    }
+    if (String(chatId) !== String(expectedChatId)) {
+        console.warn(`[TelegramBot] unauthorised access attempt from chat ID ${chatId}`);
+        await sendReply(token, chatId, '⛔ Unauthorised.');
+        return;
+    }
+
+    const text = msg.text.trim();
+    if (!text.startsWith('/')) return; // ignore non-command messages silently
+
+    // "/alerts@MyBot all" → cmd "alerts", args ["all"]
+    const parts = text.split(/\s+/);
+    const cmd = parts[0].slice(1).split('@')[0].toLowerCase();
+    const args = parts.slice(1);
+
+    console.log(`[TelegramBot] command "/${cmd}" from chat ${maskChatId(chatId)}`);
+
+    const handler = COMMANDS[cmd];
+    if (!handler) {
+        await sendReply(token, chatId, '❓ Unknown command. Send /help for available commands.');
+        return;
+    }
+
+    try {
+        const reply = await handler({ args });
+        await sendReply(token, chatId, reply);
+    } catch (err) {
+        console.error(`[TelegramBot] error running /${cmd}:`, err.message);
+        await sendReply(token, chatId, '⚠️ Something went wrong running that command. Check server logs.');
+    }
+}
+
+async function pollTick() {
+    try {
+        const settings = telegramService.getSettings();
+        const token = settings.telegram_bot_token;
+        const chatId = settings.telegram_chat_id;
+
+        // Config may have changed under us (without a save-triggered restart) — bail this tick.
+        if (!token || settings.telegram_commands_enabled !== '1') return;
+
+        let data;
+        try {
+            const url = `https://api.telegram.org/bot${token}/getUpdates?offset=${updateOffset}&timeout=0&allowed_updates=${encodeURIComponent('["message"]')}`;
+            const res = await fetch(url, { signal: AbortSignal.timeout(HTTP_TIMEOUT_MS) });
+            data = await res.json();
+        } catch (err) {
+            console.error('[TelegramBot] getUpdates failed (will retry):', err.message);
+            return;
+        }
+
+        if (!data || !data.ok || !Array.isArray(data.result)) {
+            if (data && !data.ok) console.error('[TelegramBot] getUpdates rejected:', data.description);
+            return;
+        }
+
+        for (const update of data.result) {
+            updateOffset = update.update_id + 1; // advance even if the update is rejected
+            await handleUpdate(update, token, chatId);
+        }
+    } catch (err) {
+        // Absolute backstop — the poll loop must never throw.
+        console.error('[TelegramBot] poll tick error:', err.message);
+    } finally {
+        if (running) pollTimer = setTimeout(pollTick, POLL_MS);
+    }
+}
+
+// ─── Lifecycle ──────────────────────────────────────────────────────
+
+function startBotPolling() {
+    if (running) return; // idempotent
+
+    const settings = telegramService.getSettings();
+    const token = settings.telegram_bot_token;
+    const chatId = settings.telegram_chat_id;
+
+    if (!token || !chatId || settings.telegram_commands_enabled !== '1') {
+        console.log('[TelegramBot] not starting — token/chat ID missing or commands disabled');
+        return;
+    }
+    try {
+        validateBotToken(token);
+        validateChatId(String(chatId).trim());
+    } catch (err) {
+        console.warn('[TelegramBot] not starting — invalid credentials:', err.message);
+        return;
+    }
+
+    running = true;
+    console.log('[TelegramBot] polling started');
+    pollTimer = setTimeout(pollTick, POLL_MS);
+}
+
+function stopBotPolling() {
+    if (pollTimer) {
+        clearTimeout(pollTimer);
+        pollTimer = null;
+    }
+    if (running) {
+        running = false;
+        console.log('[TelegramBot] polling stopped');
+    }
+}
+
+function restartBotPolling() {
+    console.log('[TelegramBot] polling restart requested');
+    stopBotPolling();
+    startBotPolling();
+}
+
+module.exports = {
+    startBotPolling,
+    stopBotPolling,
+    restartBotPolling,
+};

@@ -201,6 +201,11 @@ const start = async () => {
     const { startCleanupJobs } = require('./jobs/cleanupJob');
     startCleanupJobs(fastify);
 
+    // Two-way Telegram bot: inbound command long-polling (guarded internally
+    // by bot token + chat ID + telegram_commands_enabled).
+    const { startBotPolling } = require('./services/telegramBotService');
+    startBotPolling(fastify);
+
     // Ensure the IEEE OUI database exists; auto-fetch if missing (gitignored file).
     // Uses spawn (non-blocking) so the event loop stays responsive during the ~10s fetch.
     (async () => {

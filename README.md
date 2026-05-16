@@ -26,6 +26,7 @@
 - 📈 **Bandwidth Insights** — Top-talker view and per-period WAN throughput charts sourced from UniFi reports
 - 📧 **Automated Alerting** — Configurable email alerts (SMTP) for device events and high latency
 - 📲 **Telegram Notifications** — Real-time bot alerts for critical device offline/online, AP status changes, and segment outages
+- 🤖 **Two-Way Telegram Bot** — Query live network state on demand (`/status`, `/online`, `/offline`, `/critical`, `/alerts`, `/aps`, `/segments`, `/markread`) with chat-ID-whitelisted command access
 - 🤖 **AI Insights** — Automated device identification (OUI + AI), 24h anomaly detection, and alert triage via Anthropic or OpenRouter
 - 🧹 **Automated Data Maintenance** — Configurable background jobs for ping history and alert data retention
 - 🔐 **Hardened Security** — Unified JWT authentication (Socket.IO + API), login rate limiting, atomic scan locking, and hidden production stack traces
@@ -289,7 +290,8 @@ All settings are managed from the **Settings** page in the UI after logging in.
 4. Click **Test Notification** to verify.
 5. Under **Alert Event Selection**, choose which event types trigger a notification. All events are enabled by default — uncheck any you want to suppress.
 6. Optionally enable **AI-Enhanced Alerts** to append AI-generated remediation steps to each notification. Requires a valid API key in AI Settings.
-7. Click **Save Settings**.
+7. Optionally enable **Bot Commands (two-way)** to query live network state from the chat (see [Two-Way Bot Commands](#-two-way-bot-commands) below).
+8. Click **Save Settings**.
 
 ### 4. Supported Events
 
@@ -305,6 +307,50 @@ Each event type is individually toggleable. All are enabled by default.
 
 > [!NOTE]
 > Alerts fire only on **status changes**, not every scan cycle. Telegram failures are non-blocking and will never delay or crash the monitoring system.
+
+---
+
+## 🤖 Two-Way Bot Commands
+
+Beyond pushing alerts, the bot can answer **on-demand queries** about live network
+state. This is opt-in and independent of the outbound alert toggles.
+
+### Enable
+
+1. Navigate to **Settings > Telegram** and configure the **Bot Token** and **Chat ID** as above.
+2. Toggle **Enable Bot Commands (two-way)** on and click **Save Settings**.
+   Polling starts immediately — no server restart needed.
+
+### How it works
+
+- Uses **long polling** (Telegram `getUpdates`), so it works on self-hosted
+  deployments with **no public URL, no inbound port, and no webhook**.
+- **Security**: only messages from the configured **Chat ID** are processed.
+  Any other chat receives `⛔ Unauthorised.` and is ignored. This single
+  chat-ID whitelist is the only auth mechanism — sufficient for SMB self-hosted.
+- All replies are read-only snapshots queried directly from the local database;
+  commands never trigger new scans (except `/aps`, which reads UniFi live).
+
+### Commands
+
+| Command | Description |
+|---|---|
+| `/status` | Network health snapshot (devices, alerts, AP summary, next poll/scan) |
+| `/online` | Online devices, fastest first |
+| `/offline` | Offline devices, longest-offline first |
+| `/critical` | Critical-flagged devices + any active escalating polls |
+| `/alerts` | Last 10 unread alerts |
+| `/alerts all` | Last 20 alerts regardless of read state |
+| `/aps` | UniFi access point health (degrades gracefully if UniFi is unconfigured) |
+| `/segments` | Configured segments with device counts and last-scan age |
+| `/markread` | Mark all unread alerts as read |
+| `/help` | Full command reference |
+
+> [!NOTE]
+> Commands work even when outbound Telegram alerts are disabled — the polling
+> loop is gated only by the bot token, chat ID, and the **Bot Commands** toggle.
+> The loop is fully non-blocking and crash-safe; network errors are logged and
+> retried without affecting monitoring.
 
 ---
 

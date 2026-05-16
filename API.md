@@ -92,7 +92,7 @@ Accounts flagged with `must_change_password` may only call `/auth/*` and
 | `PUT` | `/settings/ai` | Save AI provider, key, and model |
 | `PUT` | `/settings/polling` | Save segment / critical / UniFi intervals |
 | `GET` | `/settings/telegram` | Telegram settings (token masked) |
-| `PUT` | `/settings/telegram` | Save Telegram bot token, chat ID, and event flags |
+| `PUT` | `/settings/telegram` | Save Telegram bot token, chat ID, event flags, and the two-way bot commands toggle (`telegram_commands_enabled`); restarts inbound bot polling |
 | `POST`| `/settings/telegram/test` | Send a test Telegram notification |
 | `PUT` | `/settings/password` | Change username + password (rate-limited: 5 / 15 min) |
 
@@ -112,6 +112,17 @@ Accounts flagged with `must_change_password` may only call `/auth/*` and
 | `POST` | `/ai/dismiss-noise` | Bulk-mark alerts as read |
 | `GET`  | `/ai/history` | Past anomaly / triage runs (`?type=&limit=`) |
 | `POST` | `/ai/restart-jobs` | Restart the AI background jobs with the latest interval settings |
+
+## Telegram Bot (inbound)
+
+The two-way Telegram bot is **not exposed as a REST endpoint**. It runs as an
+internal long-polling loop (`getUpdates`) started on server boot and restarted by
+`PUT /settings/telegram`. It is gated by the bot token, chat ID, and
+`telegram_commands_enabled`, and authorises inbound messages against the
+configured chat ID only.
+
+Supported chat commands: `/status`, `/online`, `/offline`, `/critical`,
+`/alerts`, `/alerts all`, `/aps`, `/segments`, `/markread`, `/help`.
 
 ## Errors
 

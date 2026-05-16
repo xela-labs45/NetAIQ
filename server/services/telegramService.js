@@ -495,6 +495,10 @@ async function sendTestMessageDirect(token, chatId) {
 module.exports = {
     getSettings,
     isEnabled,
+    // Exported for reuse by telegramBotService.js (inbound command handler).
+    escapeHtml,
+    validateBotToken,
+    validateChatId,
     sendMessage,
     sendTestMessage,
     sendTestMessageDirect,
