@@ -14,8 +14,12 @@ WORKDIR /app
 
 # Backend deps. `npm ci` honours package-lock.json and fails on drift, which
 # `npm install` does not — important for reproducible builds.
+#
+# Native modules (bcrypt, better-sqlite3) have no musl prebuilt binary and
+# must compile from source on Alpine, so the build toolchain is required here
+# too. This stage is discarded, so the tools are not removed afterwards.
 COPY package*.json ./
-RUN npm ci
+RUN apk add --no-cache python3 make g++ && npm ci
 
 # Frontend deps.
 COPY client/package*.json ./client/

@@ -4,19 +4,28 @@ const db = require('./database');
 async function seed() {
     console.log('Seeding database...');
 
-    // Check if admin user exists
-    const checkUser = db.prepare('SELECT id FROM users WHERE email = ?').get('admin@netaiq.local');
+    // Check if admin user exists. Guard on username, which is the column
+    // carrying the UNIQUE constraint we'd collide with on insert (the admin's
+    // email may have been changed in-app, so an email check is unreliable).
+    const checkUser = db.prepare('SELECT id FROM users WHERE username = ?').get('admin');
 
     if (!checkUser) {
         const saltRounds = 12;
         const defaultPassword = 'Admin@1234';
         const hash = await bcrypt.hash(defaultPassword, saltRounds);
 
-        db.prepare(`
-      INSERT INTO users (username, email, password_hash, must_change_password)
+        // INSERT OR IGNORE so a pre-existing admin (any email) is a no-op
+        // rather than a fatal UNIQUE-constraint error that crash-loops the
+        // container before the server can start.
+        const result = db.prepare(`
+      INSERT OR IGNORE INTO users (username, email, password_hash, must_change_password)
       VALUES (?, ?, ?, 1)
     `).run('admin', 'admin@netaiq.local', hash);
-        console.log('Admin user created: username=admin / Admin@1234');
+        if (result.changes > 0) {
+            console.log('Admin user created: username=admin / Admin@1234');
+        } else {
+            console.log('Admin user already exists.');
+        }
     } else {
         console.log('Admin user already exists.');
     }
