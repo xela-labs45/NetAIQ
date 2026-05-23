@@ -116,13 +116,26 @@ Accounts flagged with `must_change_password` may only call `/auth/*` and
 ## Telegram Bot (inbound)
 
 The two-way Telegram bot is **not exposed as a REST endpoint**. It runs as an
-internal long-polling loop (`getUpdates`) started on server boot and restarted by
-`PUT /settings/telegram`. It is gated by the bot token, chat ID, and
-`telegram_commands_enabled`, and authorises inbound messages against the
-configured chat ID only.
+internal long-polling loop (`getUpdates` with a 25s server-side wait) started
+on server boot and restarted by `PUT /settings/telegram`. It is gated by the
+bot token, chat ID, and `telegram_commands_enabled`.
 
-Supported chat commands: `/status`, `/online`, `/offline`, `/critical`,
-`/alerts`, `/alerts_all`, `/aps`, `/segments`, `/markread`, `/help`.
+Authorisation is a chat-ID allow-list parsed from `telegram_chat_id`. A single
+value or a comma-separated list (e.g. `111,222,-100333`) are both accepted.
+Unauthorised chats are silently dropped (no reply). Each authorised chat is
+rate-limited to 20 commands per minute.
+
+On startup the bot calls `setMyCommands` to register native `/` autocomplete
+with Telegram. Replies are sent threaded (`reply_to_message_id`) and
+automatically chunked across the 4096-char message limit.
+
+Supported chat commands:
+
+- **Status** — `/status`, `/online`, `/offline`, `/critical`, `/aps`,
+  `/segments`, `/alerts`, `/alerts_all`
+- **Lookups** — `/device <name|ip>`, `/segment <name>`, `/ping <ip|hostname>`
+- **Actions** — `/markread`
+- **Info** — `/version`, `/help`
 
 ## Errors
 

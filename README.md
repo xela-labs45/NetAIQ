@@ -26,7 +26,7 @@
 - 📈 **Bandwidth Insights** — Top-talker view and per-period WAN throughput charts sourced from UniFi reports
 - 📧 **Automated Alerting** — Configurable email alerts (SMTP) for device events and high latency
 - 📲 **Telegram Notifications** — Real-time bot alerts for critical device offline/online, AP status changes, and segment outages
-- 🤖 **Two-Way Telegram Bot** — Query live network state on demand (`/status`, `/online`, `/offline`, `/critical`, `/alerts`, `/alerts_all`, `/aps`, `/segments`, `/markread`) with chat-ID-whitelisted command access
+- 🤖 **Two-Way Telegram Bot** — Query live network state on demand (status snapshot, device/segment lookups, on-the-fly `/ping`, alert review) with chat-ID-whitelisted command access, multi-operator support, and per-chat rate limiting
 - 🤖 **AI Insights** — Automated device identification (OUI + AI), 24h anomaly detection, and alert triage via Anthropic or OpenRouter
 - 🧹 **Automated Data Maintenance** — Configurable background jobs for ping history and alert data retention
 - 🔐 **Hardened Security** — Unified JWT authentication (Socket.IO + API), login rate limiting, atomic scan locking, and hidden production stack traces
@@ -258,7 +258,7 @@ All settings are managed from the **Settings** page in the UI after logging in.
 |---|---|
 | **UniFi Controller** | URL and credentials for UniFi integration |
 | **SMTP / Email** | Mail server and recipient settings for alerts |
-| **Telegram** | Bot token and chat ID for real-time notifications |
+| **Telegram** | Bot token and chat ID(s) — single ID for one operator, or comma-separated for multi-operator inbound commands |
 | **Critical Ping Interval** | How often to ping critical devices (default: 120s) |
 | **Segment Scan Interval** | How often to sweep all subnets (default: 15 min) |
 | **UniFi Sync Interval** | How often to pull data from UniFi (default: 5 min) |
@@ -282,6 +282,12 @@ All settings are managed from the **Settings** page in the UI after logging in.
 1. Send `/start` to your new bot.
 2. Visit `https://api.telegram.org/bot<YOUR_TOKEN>/getUpdates` in a browser.
 3. Find `chat_id` in the JSON response. Group chat IDs are negative numbers.
+
+> [!TIP]
+> To authorise multiple operators for inbound bot commands, enter chat IDs as a
+> comma-separated list (e.g. `111111111,222222222,-100333333333`). Each entry is
+> validated independently; outbound alert notifications still go to the first
+> ID only.
 
 ### 3. Configure in NetAIQ
 1. Navigate to **Settings > Telegram**.
@@ -323,34 +329,73 @@ state. This is opt-in and independent of the outbound alert toggles.
 
 ### How it works
 
-- Uses **long polling** (Telegram `getUpdates`), so it works on self-hosted
-  deployments with **no public URL, no inbound port, and no webhook**.
-- **Security**: only messages from the configured **Chat ID** are processed.
-  Any other chat receives `⛔ Unauthorised.` and is ignored. This single
-  chat-ID whitelist is the only auth mechanism — sufficient for SMB self-hosted.
-- All replies are read-only snapshots queried directly from the local database;
-  commands never trigger new scans (except `/aps`, which reads UniFi live).
+- Uses **long polling** (Telegram `getUpdates` with a 25s server-side wait), so
+  it works on self-hosted deployments with **no public URL, no inbound port, and
+  no webhook**.
+- **Security**: only messages from chat IDs in the configured allow-list are
+  processed. Unauthorised chats are silently ignored — the bot never replies,
+  so an attacker DMing the bot cannot consume your `sendMessage` rate budget.
+  Forensic warnings are logged server-side.
+- **Multi-operator**: the chat-ID field accepts a comma-separated allow-list, so
+  several operators can share a single bot. Each operator is rate-limited
+  independently.
+- **Rate limit**: 20 commands per minute per chat ID. Excess invocations get a
+  `⏳ Too many commands — try again in Ns.` reply.
+- **Discoverability**: on startup the bot registers its command list with
+  Telegram (`setMyCommands`), so typing `/` in your chat shows native
+  autocomplete with all commands and one-line descriptions.
+- **Threading**: each reply is sent as a Telegram quote-reply to the original
+  command message, keeping context obvious in a busy chat. Long responses are
+  automatically chunked across multiple messages to stay within Telegram's
+  4096-character limit.
+- **State**: all replies are read-only snapshots queried directly from the local
+  database; commands never trigger new scans. The exceptions are `/aps` (live
+  UniFi read) and `/ping` (one-shot ICMP probe of the requested target).
+- **Resilience**: the polling loop is fully non-blocking and crash-safe. On
+  process restart the bot discards any messages queued during downtime so old
+  commands aren't replayed. Transient API errors back off and retry; a `409`
+  conflict (another consumer polling the same token) stops the loop cleanly
+  with an actionable log line.
 
 ### Commands
 
+#### 📊 Status
+
 | Command | Description |
 |---|---|
-| `/status` | Network health snapshot (devices, alerts, AP summary, next poll/scan) |
-| `/online` | Online devices, fastest first |
-| `/offline` | Offline devices, longest-offline first |
+| `/status` | Network snapshot (devices, alerts, AP summary, next poll/scan) |
+| `/online` | Devices currently up, fastest first |
+| `/offline` | Devices currently down, longest-offline first |
 | `/critical` | Critical-flagged devices + any active escalating polls |
+| `/aps` | UniFi access point health (degrades gracefully if UniFi is unconfigured) |
+| `/segments` | Configured segments with device counts and last-scan freshness |
 | `/alerts` | Last 10 unread alerts |
 | `/alerts_all` | Last 20 alerts regardless of read state (`/alerts all` also works) |
-| `/aps` | UniFi access point health (degrades gracefully if UniFi is unconfigured) |
-| `/segments` | Configured segments with device counts and last-scan age |
+
+#### 🔍 Lookups
+
+| Command | Description |
+|---|---|
+| `/device <name\|ip>` | Detail card for a single device (status, segment, MAC, vendor, last seen) |
+| `/segment <name>` | Detail card for a single segment (CIDR, device counts, last scan) |
+| `/ping <ip\|hostname>` | One-shot ICMP probe; target is validated against `[A-Za-z0-9._-]{1,253}` |
+
+#### ⚡ Actions
+
+| Command | Description |
+|---|---|
 | `/markread` | Mark all unread alerts as read |
+
+#### ℹ️ Info
+
+| Command | Description |
+|---|---|
+| `/version` | Bot version, Node version, and process uptime |
 | `/help` | Full command reference |
 
 > [!NOTE]
 > Commands work even when outbound Telegram alerts are disabled — the polling
 > loop is gated only by the bot token, chat ID, and the **Bot Commands** toggle.
-> The loop is fully non-blocking and crash-safe; network errors are logged and
-> retried without affecting monitoring.
 
 ---
 
