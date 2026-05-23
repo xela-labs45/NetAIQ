@@ -26,6 +26,22 @@ function validateChatId(chatId) {
     }
 }
 
+// Parse a comma-separated list of chat IDs into a deduped, trimmed array.
+// Each piece must satisfy validateChatId; throws on the first invalid entry.
+// Empty / null input returns []. Backward compatible with a single chat ID.
+function parseChatIdList(value) {
+    if (value == null) return [];
+    const seen = new Set();
+    const out = [];
+    for (const raw of String(value).split(',')) {
+        const id = raw.trim();
+        if (!id) continue;
+        validateChatId(id);
+        if (!seen.has(id)) { seen.add(id); out.push(id); }
+    }
+    return out;
+}
+
 // Lazy-load aiService to avoid circular dependency
 let _aiService = null;
 function getAiService() {
@@ -499,6 +515,7 @@ module.exports = {
     escapeHtml,
     validateBotToken,
     validateChatId,
+    parseChatIdList,
     sendMessage,
     sendTestMessage,
     sendTestMessageDirect,

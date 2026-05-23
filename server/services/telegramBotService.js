@@ -40,16 +40,21 @@ const telegramService = require('./telegramService');
 const unifiService = require('./unifiService');
 const alertService = require('./alertService');
 const escalatingPollManager = require('./EscalatingPollManager');
+const pingService = require('./pingService');
+const { checkRateLimit } = require('./aiService');
 const { formatInUserTimezone } = require('../utils/dateFormatter');
 const { version: APP_VERSION } = require('../../package.json');
 
-const { escapeHtml, formatDowntime, validateBotToken, validateChatId } = telegramService;
+const { escapeHtml, formatDowntime, validateBotToken, parseChatIdList } = telegramService;
 
 const LONG_POLL_SEC = 25;                                 // Telegram-side wait per getUpdates
 const POLL_MS = 1000;                                     // inter-call gap on success
 const ERROR_BACKOFF_MS = 5000;                            // gap after a failed tick (avoid tight loops)
 const HTTP_TIMEOUT_MS = (LONG_POLL_SEC + 5) * 1000;       // must exceed the server-side wait
 const MAX_CHUNK = 4000;                                   // Telegram hard limit is 4096; leave headroom
+const CMD_RATE_MAX = 20;                                  // per-chat command budget
+const CMD_RATE_WINDOW_MS = 60_000;                        // per minute
+const PING_TARGET_RE = /^[A-Za-z0-9._-]{1,253}$/;         // /ping defensive input check
 
 // ─── In-memory polling state (intentionally not persisted) ──────────
 let pollTimer = null;
@@ -74,14 +79,20 @@ async function tgApi(token, method, payload) {
     return response.json();
 }
 
-async function sendReply(token, chatId, text) {
+async function sendReply(token, chatId, text, replyTo = null) {
+    const payload = {
+        chat_id: chatId,
+        text,
+        parse_mode: 'HTML',
+        disable_web_page_preview: true
+    };
+    if (replyTo != null) {
+        // allow_sending_without_reply: don't fail if the original message was deleted.
+        payload.reply_to_message_id = replyTo;
+        payload.allow_sending_without_reply = true;
+    }
     try {
-        const data = await tgApi(token, 'sendMessage', {
-            chat_id: chatId,
-            text,
-            parse_mode: 'HTML',
-            disable_web_page_preview: true
-        });
+        const data = await tgApi(token, 'sendMessage', payload);
         if (!data.ok) {
             console.error('[TelegramBot] sendMessage rejected:', data.description || JSON.stringify(data));
         }
@@ -119,12 +130,13 @@ function chunkText(text) {
     return chunks;
 }
 
-async function sendChunked(token, chatId, text) {
+async function sendChunked(token, chatId, text, replyTo = null) {
     const chunks = chunkText(text);
-    if (chunks.length === 1) return sendReply(token, chatId, chunks[0]);
+    if (chunks.length === 1) return sendReply(token, chatId, chunks[0], replyTo);
     for (let i = 0; i < chunks.length; i++) {
         const body = i === 0 ? chunks[i] : '… ' + chunks[i];
-        await sendReply(token, chatId, body);
+        // Only the first chunk threads — twenty quote-headers in a row is noise.
+        await sendReply(token, chatId, body, i === 0 ? replyTo : null);
     }
 }
 
@@ -186,9 +198,11 @@ function name(d) {
 // ─── Device-state query (shared by /status /online /offline /critical) ──
 
 // Latest ping per device + the most recent 'up' timestamp (for offline duration).
-function getDeviceStates(where = '') {
+// `where` is interpolated as a literal SQL fragment; `params` are safely bound.
+function getDeviceStates(where = '', params = []) {
     return db.prepare(`
-        SELECT d.id, d.hostname, d.ip_address, d.is_critical, d.segment_id, d.created_at,
+        SELECT d.id, d.hostname, d.ip_address, d.mac_address, d.vendor, d.device_type,
+               d.is_critical, d.segment_id, d.notes, d.created_at,
                p.status   AS status,
                p.latency_ms AS latency_ms,
                p.timestamp  AS last_ping,
@@ -200,7 +214,7 @@ function getDeviceStates(where = '') {
                        WHERE device_id = d.id
                        ORDER BY timestamp DESC LIMIT 1)
         ${where}
-    `).all();
+    `).all(...params);
 }
 
 function offlineMs(d) {
@@ -340,10 +354,8 @@ async function cmdAps() {
     const body = list.map(ap => {
         const apName = escapeHtml(ap.name || ap.mac || 'Unknown AP');
         if (ap.state === 1) {
-            const tx = ((ap['tx_bytes-r'] || 0) * 8 / 1e6).toFixed(1);
-            const rx = ((ap['rx_bytes-r'] || 0) * 8 / 1e6).toFixed(1);
             const clients = ap['num_sta'] ?? ap.user_num_sta ?? 0;
-            return `🟢 ${apName} — ${clients} clients | ↑${tx} ↓${rx} Mbps`;
+            return `🟢 ${apName} — ${clients} clients`;
         }
         const seen = ap.last_seen ? ` (last seen ${agoText(ap.last_seen * 1000)})` : '';
         return `🔴 ${apName} — offline${seen}`;
@@ -374,6 +386,95 @@ async function cmdMarkread() {
     return `✅ Marked ${info.changes} alert${info.changes === 1 ? '' : 's'} as read.`;
 }
 
+async function cmdVersion() {
+    const uptimeMs = Math.floor(process.uptime() * 1000);
+    return [
+        '🤖 <b>NetAIQ Bot</b>',
+        `Version: ${escapeHtml(APP_VERSION)}`,
+        `Node: ${escapeHtml(process.version)}`,
+        `Uptime: ${formatDowntime(uptimeMs)}`,
+        `Time: ${escapeHtml(formatInUserTimezone(new Date()))}`,
+    ].join('\n');
+}
+
+async function cmdDevice(ctx) {
+    const target = (ctx.args[0] || '').trim();
+    if (!target) return 'Usage: /device &lt;hostname|ip&gt;';
+
+    const rows = getDeviceStates(
+        'WHERE LOWER(d.hostname) = LOWER(?) OR d.ip_address = ?',
+        [target, target]
+    );
+    if (!rows.length) return `❓ No device matches "${escapeHtml(target)}".`;
+
+    // Prefer exact IP match if multiple; otherwise first row.
+    const d = rows.find(r => r.ip_address === target) || rows[0];
+
+    let segmentName = null;
+    if (d.segment_id) {
+        const seg = db.prepare('SELECT name FROM segments WHERE id = ?').get(d.segment_id);
+        segmentName = seg?.name || null;
+    }
+
+    const statusLine = d.status === 'up'
+        ? `${deviceIcon(d.status, d.latency_ms)} up${d.latency_ms != null ? ` (${Math.round(d.latency_ms)}ms)` : ''}`
+        : `🔴 down (offline ${formatDowntime(offlineMs(d))})`;
+
+    const lines = [
+        `📡 <b>${name(d)}</b>`,
+        `IP: ${escapeHtml(d.ip_address)}`,
+    ];
+    if (d.mac_address) lines.push(`MAC: ${escapeHtml(d.mac_address)}`);
+    if (d.vendor) lines.push(`Vendor: ${escapeHtml(d.vendor)}`);
+    if (d.device_type) lines.push(`Type: ${escapeHtml(d.device_type)}`);
+    if (segmentName) lines.push(`Segment: ${escapeHtml(segmentName)}`);
+    if (d.is_critical) lines.push('Critical: yes');
+    lines.push(`Status: ${statusLine}`);
+    if (d.last_up) lines.push(`Last up: ${agoText(sqliteToMs(d.last_up))}`);
+    if (d.last_ping) lines.push(`Last checked: ${agoText(sqliteToMs(d.last_ping))}`);
+    if (d.notes) lines.push(`Notes: ${escapeHtml(d.notes)}`);
+    return lines.join('\n');
+}
+
+async function cmdSegment(ctx) {
+    const target = (ctx.args.join(' ') || '').trim();
+    if (!target) return 'Usage: /segment &lt;name&gt;';
+
+    const seg = db.prepare(`
+        SELECT s.id, s.name, s.cidr, s.description, s.color,
+               (SELECT MAX(scanned_at) FROM scan_results sr WHERE sr.segment_id = s.id) AS last_scan
+        FROM segments s
+        WHERE LOWER(s.name) = LOWER(?)
+    `).get(target);
+    if (!seg) return `❓ No segment matches "${escapeHtml(target)}".`;
+
+    const devices = getDeviceStates('WHERE d.segment_id = ?', [seg.id]);
+    const online = devices.filter(d => d.status === 'up').length;
+    const offline = devices.length - online;
+
+    const lines = [
+        `🗺 <b>${escapeHtml(seg.name)}</b> (${escapeHtml(seg.cidr)})`,
+    ];
+    if (seg.description) lines.push(`Description: ${escapeHtml(seg.description)}`);
+    lines.push(`Devices: ${devices.length} (${online} online, ${offline} offline)`);
+    lines.push(`Last scan: ${seg.last_scan ? agoText(sqliteToMs(seg.last_scan)) : 'never'}`);
+    return lines.join('\n');
+}
+
+async function cmdPing(ctx) {
+    const target = (ctx.args[0] || '').trim();
+    if (!target) return 'Usage: /ping &lt;ip|hostname&gt;';
+    if (!PING_TARGET_RE.test(target)) {
+        return '❓ Usage: /ping &lt;ip|hostname&gt; — letters, digits, dots, dashes only.';
+    }
+    const res = await pingService.performPing({ ip_address: target });
+    if (res.status === 'up') {
+        const latency = res.latency_ms != null ? `${res.latency_ms.toFixed(1)}ms` : 'n/a';
+        return `🟢 ${escapeHtml(target)} — alive (${latency}, ${res.packet_loss}% loss)`;
+    }
+    return `🔴 ${escapeHtml(target)} — no response (${res.packet_loss}% loss)`;
+}
+
 async function cmdHelp() {
     return [
         '🤖 <b>NetAIQ Bot Commands</b>',
@@ -388,10 +489,16 @@ async function cmdHelp() {
         '/aps — UniFi access point health',
         '/segments — Network segments summary',
         '',
+        '<b>🔍 Lookups</b>',
+        '/device &lt;name|ip&gt; — Device detail',
+        '/segment &lt;name&gt; — Segment detail',
+        '/ping &lt;ip|hostname&gt; — One-shot ping',
+        '',
         '<b>⚡ Actions</b>',
         '/markread — Mark all alerts as read',
         '',
         '<b>ℹ️ Info</b>',
+        '/version — Bot version &amp; uptime',
         '/help — This message',
         '',
         `NetAIQ v${escapeHtml(APP_VERSION)} | ${formatInUserTimezone(new Date())}`,
@@ -409,25 +516,63 @@ const COMMANDS = {
     alerts_all: () => cmdAlerts({ args: ['all'] }),
     aps: cmdAps,
     segments: cmdSegments,
+    device: cmdDevice,
+    segment: cmdSegment,
+    ping: cmdPing,
     markread: cmdMarkread,
+    version: cmdVersion,
     help: cmdHelp,
 };
 
+// Shown in Telegram's `/` autocomplete. Descriptions ≤ 256 chars each.
+const BOT_COMMAND_LIST = [
+    { command: 'status',     description: 'Network health snapshot' },
+    { command: 'online',     description: 'Online devices only' },
+    { command: 'offline',    description: 'Offline devices only' },
+    { command: 'critical',   description: 'Critical devices + escalating polls' },
+    { command: 'alerts',     description: 'Last 10 unread alerts' },
+    { command: 'alerts_all', description: 'Last 20 alerts (all)' },
+    { command: 'aps',        description: 'UniFi access point health' },
+    { command: 'segments',   description: 'Network segments summary' },
+    { command: 'device',     description: 'Device detail by name or IP' },
+    { command: 'segment',    description: 'Segment detail by name' },
+    { command: 'ping',       description: 'One-shot ping of an IP or hostname' },
+    { command: 'markread',   description: 'Mark all alerts as read' },
+    { command: 'version',    description: 'Bot version and uptime' },
+    { command: 'help',       description: 'List all commands' },
+];
+
+// Best-effort registration with Telegram's `/` autocomplete. Idempotent —
+// Telegram replaces the list each call. Never throws; the bot still works
+// fine without autocomplete if this fails.
+async function registerBotCommands(token) {
+    try {
+        const data = await tgApi(token, 'setMyCommands', { commands: BOT_COMMAND_LIST });
+        if (!data.ok) {
+            console.warn('[TelegramBot] setMyCommands rejected:', data.description || JSON.stringify(data));
+        } else {
+            console.log(`[TelegramBot] registered ${BOT_COMMAND_LIST.length} commands with Telegram`);
+        }
+    } catch (err) {
+        console.warn('[TelegramBot] setMyCommands failed (non-fatal):', err.message);
+    }
+}
+
 // ─── Update handling ────────────────────────────────────────────────
 
-async function handleUpdate(update, token, expectedChatId) {
+async function handleUpdate(update, token, allowed) {
     const msg = update.message;
     if (!msg || typeof msg.text !== 'string') return; // ignore non-text updates silently
 
     const chatId = msg.chat && msg.chat.id;
     if (chatId == null) return;
 
-    // Auth: single chat-ID whitelist.
-    if (!expectedChatId) {
+    // Auth: chat-ID allow-list (single or comma-separated multi-operator).
+    if (!allowed || allowed.size === 0) {
         console.warn('[TelegramBot] telegram_chat_id not configured — ignoring all updates');
         return;
     }
-    if (String(chatId) !== String(expectedChatId)) {
+    if (!allowed.has(String(chatId))) {
         // Deliberately silent — no reply. Anyone can DM a Telegram bot, so
         // responding would let an attacker burn our sendMessage rate budget
         // by spamming DMs. Forensics live in this warn line.
@@ -437,6 +582,14 @@ async function handleUpdate(update, token, expectedChatId) {
 
     const text = msg.text.trim();
     if (!text.startsWith('/')) return; // ignore non-command messages silently
+
+    // Per-chat rate limit — stops fat-fingering and accidental scripts without
+    // throttling separate operators against each other.
+    const rl = checkRateLimit('tg:cmd:' + chatId, CMD_RATE_MAX, CMD_RATE_WINDOW_MS);
+    if (!rl.allowed) {
+        await sendReply(token, chatId, `⏳ Too many commands. Try again in ${rl.resetIn}s.`);
+        return;
+    }
 
     // "/alerts@MyBot all" → cmd "alerts", args ["all"]
     const parts = text.split(/\s+/);
@@ -453,7 +606,7 @@ async function handleUpdate(update, token, expectedChatId) {
 
     try {
         const reply = await handler({ args });
-        await sendChunked(token, chatId, reply);
+        await sendChunked(token, chatId, reply, msg.message_id);
     } catch (err) {
         console.error(`[TelegramBot] error running /${cmd}:`, err.message);
         await sendReply(token, chatId, '⚠️ Something went wrong running that command. Check server logs.');
@@ -465,10 +618,19 @@ async function pollTick() {
     try {
         const settings = telegramService.getSettings();
         const token = settings.telegram_bot_token;
-        const chatId = settings.telegram_chat_id;
 
         // Config may have changed under us (without a save-triggered restart) — bail this tick.
         if (!token || settings.telegram_commands_enabled !== '1') return;
+
+        // Parse the allow-list once per tick — invalid entries (e.g. a half-typed
+        // edit in the DB) cause the parse to throw; we degrade to "ignore all".
+        let allowed;
+        try {
+            allowed = new Set(parseChatIdList(settings.telegram_chat_id));
+        } catch (err) {
+            console.warn('[TelegramBot] invalid telegram_chat_id — ignoring all updates this tick:', err.message);
+            allowed = new Set();
+        }
 
         // First tick after process boot: discard whatever's queued so we don't
         // replay yesterday's commands. offset=-1 returns at most the most
@@ -515,7 +677,7 @@ async function pollTick() {
 
         for (const update of data.result) {
             updateOffset = update.update_id + 1; // advance even if the update is rejected
-            await handleUpdate(update, token, chatId);
+            await handleUpdate(update, token, allowed);
         }
     } catch (err) {
         // Absolute backstop — the poll loop must never throw.
@@ -539,17 +701,22 @@ function startBotPolling() {
         console.log('[TelegramBot] not starting — token/chat ID missing or commands disabled');
         return;
     }
+    let operators;
     try {
         validateBotToken(token);
-        validateChatId(String(chatId).trim());
+        operators = parseChatIdList(chatId);
+        if (operators.length === 0) throw new Error('No chat IDs configured');
     } catch (err) {
         console.warn('[TelegramBot] not starting — invalid credentials:', err.message);
         return;
     }
 
     running = true;
-    console.log('[TelegramBot] polling started');
+    console.log(`[TelegramBot] polling started (${operators.length} operator${operators.length === 1 ? '' : 's'} authorised)`);
     pollTimer = setTimeout(pollTick, POLL_MS);
+    // Register the slash-command list with Telegram for /-autocomplete. Fire and
+    // forget — bootstrap stays fast and the bot still works without autocomplete.
+    registerBotCommands(token);
 }
 
 function stopBotPolling() {
