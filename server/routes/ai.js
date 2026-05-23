@@ -1,7 +1,8 @@
 const db = require('../db/database');
 const {
   getAiStatus, testConnection, fetchModels, clearModelCache,
-  identifyDevice, identifyDiscoveredDevice, getUnidentifiedDevices, detectAnomalies, summariseAlerts
+  identifyDevice, identifyDiscoveredDevice, getUnidentifiedDevices, detectAnomalies, summariseAlerts,
+  parseSqliteTs
 } = require('../services/aiService');
 const alertService = require('../services/alertService');
 const { restartAiJobs, forceTriageRun, runTriageJob } = require('../jobs/aiJob');
@@ -57,7 +58,7 @@ module.exports = async function (fastify, opts) {
 
     // RULE: Anomalies are a 24h look-back; they don't change fast.
     // We use a 60-minute stale window to avoid redundant expensive API calls on every page load.
-    const isStale = !latest || Date.now() - new Date(latest?.created_at).getTime() > 60 * 60 * 1000; // 60 mins
+    const isStale = !latest || Date.now() - parseSqliteTs(latest.created_at) > 60 * 60 * 1000; // 60 mins
     const forceRefresh = request.query.refresh === 'true';
 
     if (isStale || forceRefresh) {
@@ -109,7 +110,7 @@ module.exports = async function (fastify, opts) {
     `).get();
     // RULE: Alert Triage window is 15 minutes. Background jobs also run periodically.
     // If the user simply opens the page, we only trigger a refresh IF it's older than 15m.
-    const isStale = !latest || Date.now() - new Date(latest?.created_at).getTime() > 15 * 60 * 1000; // 15 mins
+    const isStale = !latest || Date.now() - parseSqliteTs(latest.created_at) > 15 * 60 * 1000; // 15 mins
     const forceRefresh = request.query.refresh === 'true';
 
     if (isStale || forceRefresh) {

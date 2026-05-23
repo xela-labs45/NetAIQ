@@ -35,6 +35,19 @@ setInterval(() => {
 const modelCache = new Map();
 const MODEL_CACHE_TTL = 3600000;   // 1 hour
 
+// Single-flight guards. Shared across cron and on-demand callers so double-clicking
+// "Run Full Analysis" while a cron tick is in flight cannot fan out parallel LLM calls.
+let anomalyInFlight = false;
+let triageInFlight = false;
+
+// SQLite CURRENT_TIMESTAMP returns 'YYYY-MM-DD HH:MM:SS' in UTC with no zone marker.
+// new Date() parses that as local time, so cache-freshness math drifts by the host UTC offset.
+// Same convention as alertService.js:82 and pingService.js:150.
+function parseSqliteTs(s) {
+  if (!s) return NaN;
+  return new Date(s.replace(' ', 'T') + 'Z').getTime();
+}
+
 function safeJsonParse(text) {
   if (!text) return null;
   try {
@@ -90,7 +103,7 @@ function getCached(key) {
 
   if (!dbEntry) return null;
 
-  const age = Date.now() - new Date(dbEntry.created_at).getTime();
+  const age = Date.now() - parseSqliteTs(dbEntry.created_at);
 
   // Use DB cache if less than CACHE_TTL.db_fallback old
   if (age < CACHE_TTL.db_fallback) {
@@ -118,7 +131,10 @@ function isAnthropicProvider(provider) {
 
 function getAiStatus() {
   const provider = settingsService.get('ai_provider') || 'none';
-  const enabled = settingsService.get('ai_enabled') !== 'false';
+  // settingsService stores booleans as '1'/'0'; '0'/'false' are the only disabling values.
+  // null/missing reads as enabled, matching Settings.jsx default and the UI's `!== '0'` convention.
+  const enabledRaw = settingsService.get('ai_enabled');
+  const enabled = enabledRaw !== '0' && enabledRaw !== 'false';
   const model = settingsService.get('ai_model') || null;
 
   const hasKey = isAnthropicProvider(provider)
@@ -145,15 +161,15 @@ function getAiStatus() {
   };
 }
 
-async function callAI(systemPrompt, userPrompt, maxTokens = 1024) {
+async function callAI(systemPrompt, userPrompt, maxTokens = 1024, signal) {
   const status = getAiStatus();
   if (!status.available) return null;
 
   if (isAnthropicProvider(status.provider)) {
-    return await callClaude(systemPrompt, userPrompt, maxTokens, status.model);
+    return await callClaude(systemPrompt, userPrompt, maxTokens, status.model, signal);
   }
   if (status.provider === 'openrouter') {
-    return await callOpenRouter(systemPrompt, userPrompt, maxTokens, status.model);
+    return await callOpenRouter(systemPrompt, userPrompt, maxTokens, status.model, signal);
   }
   return null;
 }
@@ -168,33 +184,43 @@ async function safeCallAI(systemPrompt, userPrompt, maxTokens) {
   return result;  // null if both attempts failed
 }
 
-async function callClaude(systemPrompt, userPrompt, maxTokens, model) {
+async function callClaude(systemPrompt, userPrompt, maxTokens, model, signal) {
   const apiKey = settingsService.get('ai_anthropic_key') || settingsService.get('ai_claude_key');
   if (!apiKey) return null;
 
   const resolvedModel = model || 'claude-3-5-sonnet-20241022';
   try {
-    const client = new Anthropic({ apiKey });
+    // timeout caps any single attempt; maxRetries: 1 prevents the SDK's default 2-retry
+    // amplification of timeout/5xx spend (the cron's running flag would also stay pinned).
+    const client = new Anthropic({ apiKey, timeout: 30000, maxRetries: 1 });
     const response = await client.messages.create({
       model: resolvedModel,
       max_tokens: maxTokens,
       system: systemPrompt,
       messages: [{ role: 'user', content: userPrompt }]
-    });
+    }, signal ? { signal } : undefined);
     return response.content[0]?.text || null;
   } catch (err) {
+    if (err.name === 'AbortError') return null;
     console.error('Claude API error:', err.message);
     return null;
   }
 }
 
-async function callOpenRouter(systemPrompt, userPrompt, maxTokens, model) {
+async function callOpenRouter(systemPrompt, userPrompt, maxTokens, model, externalSignal) {
   const apiKey = settingsService.get('ai_openrouter_key');
   if (!apiKey) return null;
 
   const resolvedModel = model || 'mistralai/mistral-7b-instruct';
+  // Internal 15 s ceiling, OR-ed with any caller-supplied signal so an upstream
+  // cancellation (e.g. enhanceAlertWithAI's 10 s budget) aborts the underlying fetch too.
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 15000); // 15s timeout
+  const timeout = setTimeout(() => controller.abort(), 15000);
+  const onExternalAbort = () => controller.abort();
+  if (externalSignal) {
+    if (externalSignal.aborted) controller.abort();
+    else externalSignal.addEventListener('abort', onExternalAbort, { once: true });
+  }
 
   try {
     const response = await fetch(
@@ -219,9 +245,12 @@ async function callOpenRouter(systemPrompt, userPrompt, maxTokens, model) {
       }
     );
     clearTimeout(timeout);
+    if (externalSignal) externalSignal.removeEventListener('abort', onExternalAbort);
 
     if (!response.ok) {
-      const err = await response.json();
+      clearTimeout(timeout);
+      if (externalSignal) externalSignal.removeEventListener('abort', onExternalAbort);
+      const err = await response.json().catch(() => ({}));
       console.error('OpenRouter error:', err);
       return null;
     }
@@ -229,6 +258,8 @@ async function callOpenRouter(systemPrompt, userPrompt, maxTokens, model) {
     return data.choices?.[0]?.message?.content || null;
   } catch (err) {
     clearTimeout(timeout);
+    if (externalSignal) externalSignal.removeEventListener('abort', onExternalAbort);
+    if (err.name === 'AbortError') return null;
     console.error('OpenRouter error:', err.message);
     return null;
   }
@@ -240,7 +271,7 @@ async function testConnection(provider, apiKey, model) {
 
   try {
     if (isAnthropicProvider(provider)) {
-      const client = new Anthropic({ apiKey });
+      const client = new Anthropic({ apiKey, timeout: 15000, maxRetries: 1 });
       const r = await client.messages.create({
         model: model || 'claude-3-5-sonnet-20241022',
         max_tokens: 20,
@@ -308,7 +339,7 @@ async function fetchModels(provider, apiKey) {
 
   if (isAnthropicProvider(provider)) {
     try {
-      const client = new Anthropic({ apiKey });
+      const client = new Anthropic({ apiKey, timeout: 15000, maxRetries: 1 });
       const response = await client.models.list();
       const models = response.data
         .sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0))
@@ -627,12 +658,27 @@ function getUnidentifiedDevices() {
 }
 
 async function detectAnomalies(forceRefresh = false) {
+  // Single-flight: if another caller is already running, return cached and skip.
+  if (anomalyInFlight) {
+    const cached = getCached('anomalies');
+    return cached ? { ...cached.result, cached_at: cached.cached_at, in_flight: true } : null;
+  }
+
   const rate = checkRateLimit('anomalies', 3, 5 * 60 * 1000);
   if (!rate.allowed && !forceRefresh) {
     const cached = getCached('anomalies');
     return cached ? { ...cached.result, cached_at: cached.cached_at, rate_limited: true } : null;
   }
 
+  anomalyInFlight = true;
+  try {
+    return await runAnomalyDetection();
+  } finally {
+    anomalyInFlight = false;
+  }
+}
+
+async function runAnomalyDetection() {
   const deviceStats = db.prepare(`
         SELECT
         d.id,
@@ -715,12 +761,26 @@ Return this exact JSON:
 }
 
 async function summariseAlerts(forceRefresh = false) {
+  if (triageInFlight) {
+    const cached = getCached('alert_triage');
+    return cached ? { ...cached.result, cached_at: cached.cached_at, in_flight: true } : null;
+  }
+
   const rate = checkRateLimit('alert_triage', 5, 5 * 60 * 1000);
   if (!rate.allowed && !forceRefresh) {
     const cached = getCached('alert_triage');
     return cached ? { ...cached.result, cached_at: cached.cached_at, rate_limited: true } : null;
   }
 
+  triageInFlight = true;
+  try {
+    return await runAlertSummary();
+  } finally {
+    triageInFlight = false;
+  }
+}
+
+async function runAlertSummary() {
   const alerts = db.prepare(`
         SELECT
         a.id, a.alert_type, a.severity,
@@ -921,13 +981,16 @@ async function enhanceAlertWithAI(eventType, context) {
 
     const userPrompt = promptBuilder(context);
 
-    // Race the AI call against a 10-second timeout
-    const result = await Promise.race([
-      callAI(ALERT_SYSTEM_PROMPT, userPrompt, 300),
-      new Promise((_, reject) => setTimeout(() => reject(new Error('AI timeout (10s)')), 10000))
-    ]);
-
-    return result || null;
+    // 10-second budget that actually cancels the underlying HTTP request
+    // (Promise.race only rejected the wrapper — the API call kept running and billed).
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 10000);
+    try {
+      const result = await callAI(ALERT_SYSTEM_PROMPT, userPrompt, 300, controller.signal);
+      return result || null;
+    } finally {
+      clearTimeout(timeoutId);
+    }
   } catch (err) {
     console.error('enhanceAlertWithAI error (non-blocking):', err.message);
     return null;
@@ -937,5 +1000,5 @@ async function enhanceAlertWithAI(eventType, context) {
 module.exports = {
   getAiStatus, testConnection, fetchModels, clearModelCache,
   identifyDevice, identifyDiscoveredDevice, getUnidentifiedDevices, detectAnomalies,
-  summariseAlerts, checkRateLimit, enhanceAlertWithAI
+  summariseAlerts, checkRateLimit, enhanceAlertWithAI, parseSqliteTs
 };
