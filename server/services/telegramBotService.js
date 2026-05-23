@@ -45,13 +45,21 @@ const { version: APP_VERSION } = require('../../package.json');
 
 const { escapeHtml, formatDowntime, validateBotToken, validateChatId } = telegramService;
 
-const POLL_MS = 2000;          // loop cadence
-const HTTP_TIMEOUT_MS = 10000; // per Telegram API call
+const LONG_POLL_SEC = 25;                                 // Telegram-side wait per getUpdates
+const POLL_MS = 1000;                                     // inter-call gap on success
+const ERROR_BACKOFF_MS = 5000;                            // gap after a failed tick (avoid tight loops)
+const HTTP_TIMEOUT_MS = (LONG_POLL_SEC + 5) * 1000;       // must exceed the server-side wait
+const MAX_CHUNK = 4000;                                   // Telegram hard limit is 4096; leave headroom
 
 // ─── In-memory polling state (intentionally not persisted) ──────────
 let pollTimer = null;
 let updateOffset = 0;
 let running = false;
+// Set once at module load. Causes the very first poll tick after process boot
+// to discard whatever was queued in Telegram's 24h backlog, so a restart
+// doesn't replay yesterday's commands. Deliberately NOT reset by
+// restartBotPolling() — a settings save shouldn't drop legitimate queued cmds.
+let coldStart = true;
 
 // ─── Telegram API helpers ───────────────────────────────────────────
 
@@ -81,6 +89,42 @@ async function sendReply(token, chatId, text) {
     } catch (err) {
         console.error('[TelegramBot] sendMessage failed:', err.message);
         return { ok: false, description: err.message };
+    }
+}
+
+// Split a reply on newline boundaries into pieces ≤ MAX_CHUNK. HTML tags in
+// our command outputs never span lines, so per-line splitting keeps each chunk
+// independently well-formed. A pathological >MAX_CHUNK single line is hard-split
+// as a last-resort safety net.
+function chunkText(text) {
+    if (text.length <= MAX_CHUNK) return [text];
+    const lines = text.split('\n');
+    const chunks = [];
+    let current = '';
+    for (const line of lines) {
+        if (line.length > MAX_CHUNK) {
+            if (current) { chunks.push(current); current = ''; }
+            for (let i = 0; i < line.length; i += MAX_CHUNK) chunks.push(line.slice(i, i + MAX_CHUNK));
+            continue;
+        }
+        const candidate = current ? current + '\n' + line : line;
+        if (candidate.length > MAX_CHUNK) {
+            chunks.push(current);
+            current = line;
+        } else {
+            current = candidate;
+        }
+    }
+    if (current) chunks.push(current);
+    return chunks;
+}
+
+async function sendChunked(token, chatId, text) {
+    const chunks = chunkText(text);
+    if (chunks.length === 1) return sendReply(token, chatId, chunks[0]);
+    for (let i = 0; i < chunks.length; i++) {
+        const body = i === 0 ? chunks[i] : '… ' + chunks[i];
+        await sendReply(token, chatId, body);
     }
 }
 
@@ -195,7 +239,7 @@ async function cmdStatus() {
 }
 
 async function cmdOnline() {
-    const rows = getDeviceStates("WHERE 1=1")
+    const rows = getDeviceStates()
         .filter(d => d.status === 'up')
         .sort((a, b) => (a.latency_ms ?? 1e9) - (b.latency_ms ?? 1e9));
 
@@ -319,7 +363,7 @@ async function cmdSegments() {
         const scan = s.last_scan ? `last scan ${agoText(sqliteToMs(s.last_scan))}` : 'never scanned';
         return `${escapeHtml(s.name)} (${escapeHtml(s.cidr)}) — ${s.device_count} devices, ${scan}`;
     });
-    return [`🗺 <b>Network Segments (${rows.length})</b>`, '', ...body].join('\n');
+    return [`🗺 <b>Network Segments (${rows.length})</b>`, ...body].join('\n');
 }
 
 async function cmdMarkread() {
@@ -381,8 +425,10 @@ async function handleUpdate(update, token, expectedChatId) {
         return;
     }
     if (String(chatId) !== String(expectedChatId)) {
+        // Deliberately silent — no reply. Anyone can DM a Telegram bot, so
+        // responding would let an attacker burn our sendMessage rate budget
+        // by spamming DMs. Forensics live in this warn line.
         console.warn(`[TelegramBot] unauthorised access attempt from chat ID ${chatId}`);
-        await sendReply(token, chatId, '⛔ Unauthorised.');
         return;
     }
 
@@ -404,7 +450,7 @@ async function handleUpdate(update, token, expectedChatId) {
 
     try {
         const reply = await handler({ args });
-        await sendReply(token, chatId, reply);
+        await sendChunked(token, chatId, reply);
     } catch (err) {
         console.error(`[TelegramBot] error running /${cmd}:`, err.message);
         await sendReply(token, chatId, '⚠️ Something went wrong running that command. Check server logs.');
@@ -412,6 +458,7 @@ async function handleUpdate(update, token, expectedChatId) {
 }
 
 async function pollTick() {
+    let tickError = false;
     try {
         const settings = telegramService.getSettings();
         const token = settings.telegram_bot_token;
@@ -420,18 +467,46 @@ async function pollTick() {
         // Config may have changed under us (without a save-triggered restart) — bail this tick.
         if (!token || settings.telegram_commands_enabled !== '1') return;
 
+        // First tick after process boot: discard whatever's queued so we don't
+        // replay yesterday's commands. offset=-1 returns at most the most
+        // recent update; we advance past it without invoking handlers.
+        if (coldStart) {
+            coldStart = false;
+            try {
+                const skipUrl = `https://api.telegram.org/bot${token}/getUpdates?offset=-1&limit=1&timeout=0&allowed_updates=${encodeURIComponent('["message"]')}`;
+                const res = await fetch(skipUrl, { signal: AbortSignal.timeout(HTTP_TIMEOUT_MS) });
+                const data = await res.json();
+                if (data && data.ok && Array.isArray(data.result) && data.result.length) {
+                    updateOffset = data.result[data.result.length - 1].update_id + 1;
+                    console.log(`[TelegramBot] cold start — skipped backlog up to update_id ${updateOffset - 1}`);
+                }
+            } catch (err) {
+                console.warn('[TelegramBot] cold-start backlog skip failed (continuing):', err.message);
+            }
+            return; // pick up at the new offset on the next tick
+        }
+
         let data;
         try {
-            const url = `https://api.telegram.org/bot${token}/getUpdates?offset=${updateOffset}&timeout=0&allowed_updates=${encodeURIComponent('["message"]')}`;
+            const url = `https://api.telegram.org/bot${token}/getUpdates?offset=${updateOffset}&timeout=${LONG_POLL_SEC}&allowed_updates=${encodeURIComponent('["message"]')}`;
             const res = await fetch(url, { signal: AbortSignal.timeout(HTTP_TIMEOUT_MS) });
             data = await res.json();
         } catch (err) {
             console.error('[TelegramBot] getUpdates failed (will retry):', err.message);
+            tickError = true;
             return;
         }
 
         if (!data || !data.ok || !Array.isArray(data.result)) {
+            // 409 = another consumer is polling this bot (webhook set, or duplicate
+            // instance). Keep-polling would just hammer the same error forever.
+            if (data && data.error_code === 409) {
+                console.error('[TelegramBot] 409 Conflict — another consumer is polling this bot. Stopping. Delete the webhook (or shut down the other instance), then re-save Telegram settings to restart.');
+                stopBotPolling();
+                return;
+            }
             if (data && !data.ok) console.error('[TelegramBot] getUpdates rejected:', data.description);
+            tickError = true;
             return;
         }
 
@@ -442,8 +517,9 @@ async function pollTick() {
     } catch (err) {
         // Absolute backstop — the poll loop must never throw.
         console.error('[TelegramBot] poll tick error:', err.message);
+        tickError = true;
     } finally {
-        if (running) pollTimer = setTimeout(pollTick, POLL_MS);
+        if (running) pollTimer = setTimeout(pollTick, tickError ? ERROR_BACKOFF_MS : POLL_MS);
     }
 }
 
