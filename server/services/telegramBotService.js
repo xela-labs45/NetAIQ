@@ -150,8 +150,11 @@ function clock(date) {
 
 function agoText(ms) {
     if (ms == null) return 'unknown';
-    const mins = Math.max(0, Math.round((Date.now() - ms) / 60000));
-    if (mins < 1) return 'just now';
+    // Floor everything so the boundaries are monotonic — Math.round caused a
+    // jump from "just now" straight to "1m ago" at the 30s mark.
+    const secs = Math.max(0, Math.floor((Date.now() - ms) / 1000));
+    if (secs < 60) return 'just now';
+    const mins = Math.floor(secs / 60);
     if (mins < 60) return `${mins}m ago`;
     const h = Math.floor(mins / 60);
     const m = mins % 60;
