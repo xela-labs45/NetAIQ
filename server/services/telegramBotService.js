@@ -227,7 +227,6 @@ function offlineMs(d) {
 async function cmdStatus() {
     const devices = getDeviceStates();
     const total = devices.length;
-    const online = devices.filter(d => d.status === 'up');
     const offline = devices.filter(d => d.status !== 'up');
     const offlineNames = offline.slice(0, 3).map(name).join(', ');
 
@@ -235,22 +234,24 @@ async function cmdStatus() {
 
     const lines = [
         '🌐 <b>NetAIQ Status</b>',
-        `📡 Devices: ${online.length} online / ${total} tracked`,
-        `🔴 Offline: ${offline.length} (${offline.length ? offlineNames + (offline.length > 3 ? ', …' : '') : 'none'})`,
-        `🔔 Alerts: ${counts.unread_count} unread (${counts.critical_count} critical)`,
+        `<b>Devices:</b> ${total} monitored · ${offline.length} down`,
     ];
+    if (offline.length) {
+        lines.push(`<b>Down:</b> ${offlineNames}${offline.length > 3 ? ', …' : ''}`);
+    }
+    lines.push(`<b>Alerts:</b> ${counts.unread_count} unread (${counts.critical_count} critical)`);
 
     // AP line only if UniFi is configured & reachable — degrade silently otherwise.
     try {
         const wlan = await unifiService.getWlanHealth();
         if (wlan) {
-            lines.push(`📶 APs: ${wlan.num_ap} total, ${wlan.num_disconnected} down | ${wlan.num_user} clients`);
+            lines.push(`<b>Access points:</b> ${wlan.num_ap} · ${wlan.num_disconnected} down · ${wlan.num_user} clients`);
         }
     } catch (_) { /* omit AP line on failure */ }
 
     const cp = require('../jobs/criticalPingJob').getStatus();
     const sj = require('../jobs/scanJob').getStatus();
-    lines.push(`⏱ Critical poll: next in ${nextRunText(cp, 's')} | Segment scan: next in ${nextRunText(sj, 'm')}`);
+    lines.push(`<b>Schedules:</b> critical poll in ${nextRunText(cp, 's')} · scan in ${nextRunText(sj, 'm')}`);
 
     return lines.join('\n');
 }
@@ -260,13 +261,13 @@ async function cmdOnline() {
         .filter(d => d.status === 'up')
         .sort((a, b) => (a.latency_ms ?? 1e9) - (b.latency_ms ?? 1e9));
 
-    if (!rows.length) return '✅ <b>Online Devices (0)</b>\nNo devices are currently online.';
+    if (!rows.length) return 'No devices currently up.';
 
     const body = rows.map(d => {
         const lat = d.latency_ms != null ? `${Math.round(d.latency_ms)}ms` : 'n/a';
-        return `${deviceIcon(d.status, d.latency_ms)} ${name(d)} — ${escapeHtml(d.ip_address)} (${lat})`;
+        return `${deviceIcon(d.status, d.latency_ms)} ${name(d)} · ${escapeHtml(d.ip_address)} · ${lat}`;
     });
-    return [`✅ <b>Online Devices (${rows.length})</b>`, ...body].join('\n');
+    return [`🟢 <b>Online devices</b> (${rows.length})`, ...body].join('\n');
 }
 
 async function cmdOffline() {
@@ -275,11 +276,11 @@ async function cmdOffline() {
         .map(d => ({ d, off: offlineMs(d) }))
         .sort((a, b) => (b.off ?? 0) - (a.off ?? 0)); // longest offline first
 
-    if (!rows.length) return '✅ All tracked devices are online.';
+    if (!rows.length) return 'All monitored devices are up.';
 
     const body = rows.map(({ d, off }) =>
-        `🔴 ${name(d)} — ${escapeHtml(d.ip_address)} (offline ${formatDowntime(off)})`);
-    return [`❌ <b>Offline Devices (${rows.length})</b>`, ...body].join('\n');
+        `🔴 ${name(d)} · ${escapeHtml(d.ip_address)} · down ${formatDowntime(off)}`);
+    return [`🔴 <b>Offline devices</b> (${rows.length})`, ...body].join('\n');
 }
 
 async function cmdCritical() {
@@ -287,32 +288,32 @@ async function cmdCritical() {
     const escalating = escalatingPollManager.getEscalatingStatus();
     const escById = new Map(escalating.map(e => [e.deviceId, e]));
 
-    if (!rows.length) return '⚠️ <b>Critical Devices (0)</b>\nNo devices are flagged critical.';
+    if (!rows.length) return 'No devices flagged critical.';
 
     const body = rows.map(d => {
         const esc = escById.get(d.id);
         if (esc) {
-            return `🔴 ${name(d)} — ${escapeHtml(d.ip_address)} (offline ${formatDowntime(offlineMs(d))}) [escalating: attempt ${esc.attempts}/${esc.max}]`;
+            return `🔴 ${name(d)} · ${escapeHtml(d.ip_address)} · down ${formatDowntime(offlineMs(d))} · escalating ${esc.attempts}/${esc.max}`;
         }
         if (d.status === 'up') {
             const lat = d.latency_ms != null ? `${Math.round(d.latency_ms)}ms` : 'n/a';
-            return `${deviceIcon(d.status, d.latency_ms)} ${name(d)} — ${escapeHtml(d.ip_address)} (${lat}) [critical]`;
+            return `${deviceIcon(d.status, d.latency_ms)} ${name(d)} · ${escapeHtml(d.ip_address)} · ${lat}`;
         }
-        return `🔴 ${name(d)} — ${escapeHtml(d.ip_address)} (offline ${formatDowntime(offlineMs(d))}) [critical]`;
+        return `🔴 ${name(d)} · ${escapeHtml(d.ip_address)} · down ${formatDowntime(offlineMs(d))}`;
     });
 
-    body.push(`Escalating polls active: ${escalating.length}`);
-    return [`⚠️ <b>Critical Devices (${rows.length})</b>`, ...body].join('\n');
+    const out = [`⚠️ <b>Critical devices</b> (${rows.length})`, ...body];
+    if (escalating.length) out.push(`<i>${escalating.length} escalating poll${escalating.length === 1 ? '' : 's'} active.</i>`);
+    return out.join('\n');
 }
 
-function renderAlerts(rows, header, { showRead = false } = {}) {
+function renderAlerts(rows, header, { italicizeRead = false } = {}) {
     if (!rows.length) return `🔔 <b>${header}</b>\nNothing to show.`;
     const body = rows.map(a => {
         const who = a.hostname || a.ip_address;
-        const subject = who ? `${escapeHtml(who)}: ` : '';
-        const sev = String(a.severity || '').toUpperCase();
-        const readTag = showRead && a.is_read ? ' [read]' : '';
-        return `${sevIcon(a.severity)} [${clock(a.created_at)}] ${subject}${escapeHtml(a.message)} — ${sev}${readTag}`;
+        const subject = who ? `${escapeHtml(who)} · ` : '';
+        const row = `${sevIcon(a.severity)} ${clock(a.created_at)} · ${subject}${escapeHtml(a.message)}`;
+        return italicizeRead && a.is_read ? `<i>${row}</i>` : row;
     });
     return [`🔔 <b>${header}</b>`, ...body].join('\n');
 }
@@ -326,7 +327,7 @@ async function cmdAlerts(ctx) {
             FROM alerts a LEFT JOIN devices d ON d.id = a.device_id
             ORDER BY a.created_at DESC LIMIT 20
         `).all();
-        return renderAlerts(rows, `Alerts — last ${rows.length} (all)`, { showRead: true });
+        return renderAlerts(rows, `Alerts — last ${rows.length}`, { italicizeRead: true });
     }
     const rows = db.prepare(`
         SELECT a.id, a.message, a.severity, a.is_read, a.created_at,
@@ -335,8 +336,9 @@ async function cmdAlerts(ctx) {
         WHERE a.is_read = 0
         ORDER BY a.created_at DESC LIMIT 10
     `).all();
-    const out = renderAlerts(rows, `Unread Alerts (${rows.length})`);
-    return rows.length ? out + '\n\nSend /markread to clear all.' : '✅ No unread alerts.';
+    if (!rows.length) return 'No unread alerts.';
+    return renderAlerts(rows, `Unread alerts (${rows.length})`)
+        + '\n<i>Use /markread to mark all as read.</i>';
 }
 
 async function cmdAps() {
@@ -344,23 +346,23 @@ async function cmdAps() {
     try {
         resp = await unifiService.getDevices();
     } catch (_) {
-        return '📶 UniFi unreachable — could not fetch access points.';
+        return '📶 UniFi unreachable.';
     }
     if (!resp) return '📶 UniFi not configured.';
 
     const list = (resp.data || resp || []).filter(x => x && x.type === 'uap');
-    if (!list.length) return '📶 <b>Access Points (0)</b>\nNo access points reported by UniFi.';
+    if (!list.length) return 'No access points reported by UniFi.';
 
     const body = list.map(ap => {
         const apName = escapeHtml(ap.name || ap.mac || 'Unknown AP');
         if (ap.state === 1) {
             const clients = ap['num_sta'] ?? ap.user_num_sta ?? 0;
-            return `🟢 ${apName} — ${clients} clients`;
+            return `🟢 ${apName} · ${clients} clients`;
         }
-        const seen = ap.last_seen ? ` (last seen ${agoText(ap.last_seen * 1000)})` : '';
-        return `🔴 ${apName} — offline${seen}`;
+        const seen = ap.last_seen ? ` · last seen ${agoText(ap.last_seen * 1000)}` : '';
+        return `🔴 ${apName} · offline${seen}`;
     });
-    return [`📶 <b>Access Points (${list.length})</b>`, ...body].join('\n');
+    return [`📶 <b>Access points</b> (${list.length})`, ...body].join('\n');
 }
 
 async function cmdSegments() {
@@ -372,13 +374,17 @@ async function cmdSegments() {
         ORDER BY s.name
     `).all();
 
-    if (!rows.length) return '🗺 <b>Network Segments (0)</b>\nNo segments configured.';
+    if (!rows.length) return 'No segments configured.';
 
+    const DAY_MS = 24 * 60 * 60 * 1000;
     const body = rows.map(s => {
-        const scan = s.last_scan ? `last scan ${agoText(sqliteToMs(s.last_scan))}` : 'never scanned';
-        return `${escapeHtml(s.name)} (${escapeHtml(s.cidr)}) — ${s.device_count} devices, ${scan}`;
+        const lastScanMs = sqliteToMs(s.last_scan);
+        const fresh = lastScanMs != null && (Date.now() - lastScanMs) < DAY_MS;
+        const dot = fresh ? '🟢' : '⚪';
+        const scan = lastScanMs != null ? `last scan ${agoText(lastScanMs)}` : 'never scanned';
+        return `${dot} ${escapeHtml(s.name)} · ${escapeHtml(s.cidr)} · ${s.device_count} devices · ${scan}`;
     });
-    return [`🗺 <b>Network Segments (${rows.length})</b>`, ...body].join('\n');
+    return [`🗺 <b>Network segments</b> (${rows.length})`, ...body].join('\n');
 }
 
 async function cmdMarkread() {
@@ -390,22 +396,22 @@ async function cmdVersion() {
     const uptimeMs = Math.floor(process.uptime() * 1000);
     return [
         '🤖 <b>NetAIQ Bot</b>',
-        `Version: ${escapeHtml(APP_VERSION)}`,
-        `Node: ${escapeHtml(process.version)}`,
-        `Uptime: ${formatDowntime(uptimeMs)}`,
-        `Time: ${escapeHtml(formatInUserTimezone(new Date()))}`,
+        `<b>Version:</b> ${escapeHtml(APP_VERSION)}`,
+        `<b>Node:</b> ${escapeHtml(process.version)}`,
+        `<b>Uptime:</b> ${formatDowntime(uptimeMs)}`,
+        `<b>Time:</b> ${escapeHtml(formatInUserTimezone(new Date()))}`,
     ].join('\n');
 }
 
 async function cmdDevice(ctx) {
     const target = (ctx.args[0] || '').trim();
-    if (!target) return 'Usage: /device &lt;hostname|ip&gt;';
+    if (!target) return '<i>Usage:</i> /device &lt;name|ip&gt;';
 
     const rows = getDeviceStates(
         'WHERE LOWER(d.hostname) = LOWER(?) OR d.ip_address = ?',
         [target, target]
     );
-    if (!rows.length) return `❓ No device matches "${escapeHtml(target)}".`;
+    if (!rows.length) return `No device matches "${escapeHtml(target)}".`;
 
     // Prefer exact IP match if multiple; otherwise first row.
     const d = rows.find(r => r.ip_address === target) || rows[0];
@@ -417,28 +423,28 @@ async function cmdDevice(ctx) {
     }
 
     const statusLine = d.status === 'up'
-        ? `${deviceIcon(d.status, d.latency_ms)} up${d.latency_ms != null ? ` (${Math.round(d.latency_ms)}ms)` : ''}`
-        : `🔴 down (offline ${formatDowntime(offlineMs(d))})`;
+        ? `${deviceIcon(d.status, d.latency_ms)} up${d.latency_ms != null ? ` · ${Math.round(d.latency_ms)}ms` : ''}`
+        : `🔴 down · ${formatDowntime(offlineMs(d))}`;
 
     const lines = [
         `📡 <b>${name(d)}</b>`,
-        `IP: ${escapeHtml(d.ip_address)}`,
+        `<b>IP:</b> ${escapeHtml(d.ip_address)}`,
     ];
-    if (d.mac_address) lines.push(`MAC: ${escapeHtml(d.mac_address)}`);
-    if (d.vendor) lines.push(`Vendor: ${escapeHtml(d.vendor)}`);
-    if (d.device_type) lines.push(`Type: ${escapeHtml(d.device_type)}`);
-    if (segmentName) lines.push(`Segment: ${escapeHtml(segmentName)}`);
-    if (d.is_critical) lines.push('Critical: yes');
-    lines.push(`Status: ${statusLine}`);
-    if (d.last_up) lines.push(`Last up: ${agoText(sqliteToMs(d.last_up))}`);
-    if (d.last_ping) lines.push(`Last checked: ${agoText(sqliteToMs(d.last_ping))}`);
-    if (d.notes) lines.push(`Notes: ${escapeHtml(d.notes)}`);
+    if (d.mac_address) lines.push(`<b>MAC:</b> ${escapeHtml(d.mac_address)}`);
+    if (d.vendor) lines.push(`<b>Vendor:</b> ${escapeHtml(d.vendor)}`);
+    if (d.device_type) lines.push(`<b>Type:</b> ${escapeHtml(d.device_type)}`);
+    if (segmentName) lines.push(`<b>Segment:</b> ${escapeHtml(segmentName)}`);
+    lines.push(`<b>Status:</b> ${statusLine}`);
+    if (d.last_up) lines.push(`<b>Last up:</b> ${agoText(sqliteToMs(d.last_up))}`);
+    if (d.last_ping) lines.push(`<b>Last checked:</b> ${agoText(sqliteToMs(d.last_ping))}`);
+    if (d.notes) lines.push(`<b>Notes:</b> ${escapeHtml(d.notes)}`);
+    if (d.is_critical) lines.push('<i>Flagged critical.</i>');
     return lines.join('\n');
 }
 
 async function cmdSegment(ctx) {
     const target = (ctx.args.join(' ') || '').trim();
-    if (!target) return 'Usage: /segment &lt;name&gt;';
+    if (!target) return '<i>Usage:</i> /segment &lt;name&gt;';
 
     const seg = db.prepare(`
         SELECT s.id, s.name, s.cidr, s.description, s.color,
@@ -446,48 +452,49 @@ async function cmdSegment(ctx) {
         FROM segments s
         WHERE LOWER(s.name) = LOWER(?)
     `).get(target);
-    if (!seg) return `❓ No segment matches "${escapeHtml(target)}".`;
+    if (!seg) return `No segment matches "${escapeHtml(target)}".`;
 
     const devices = getDeviceStates('WHERE d.segment_id = ?', [seg.id]);
     const online = devices.filter(d => d.status === 'up').length;
     const offline = devices.length - online;
 
     const lines = [
-        `🗺 <b>${escapeHtml(seg.name)}</b> (${escapeHtml(seg.cidr)})`,
+        `🗺 <b>${escapeHtml(seg.name)}</b>`,
+        `<b>CIDR:</b> ${escapeHtml(seg.cidr)}`,
     ];
-    if (seg.description) lines.push(`Description: ${escapeHtml(seg.description)}`);
-    lines.push(`Devices: ${devices.length} (${online} online, ${offline} offline)`);
-    lines.push(`Last scan: ${seg.last_scan ? agoText(sqliteToMs(seg.last_scan)) : 'never'}`);
+    if (seg.description) lines.push(`<b>Description:</b> ${escapeHtml(seg.description)}`);
+    lines.push(`<b>Devices:</b> ${devices.length} (${online} up · ${offline} down)`);
+    lines.push(`<b>Last scan:</b> ${seg.last_scan ? agoText(sqliteToMs(seg.last_scan)) : 'never'}`);
     return lines.join('\n');
 }
 
 async function cmdPing(ctx) {
     const target = (ctx.args[0] || '').trim();
-    if (!target) return 'Usage: /ping &lt;ip|hostname&gt;';
+    if (!target) return '<i>Usage:</i> /ping &lt;ip|hostname&gt;';
     if (!PING_TARGET_RE.test(target)) {
-        return '❓ Usage: /ping &lt;ip|hostname&gt; — letters, digits, dots, dashes only.';
+        return '<i>Usage:</i> /ping &lt;ip|hostname&gt; — letters, digits, dots, dashes only.';
     }
     const res = await pingService.performPing({ ip_address: target });
     if (res.status === 'up') {
         const latency = res.latency_ms != null ? `${res.latency_ms.toFixed(1)}ms` : 'n/a';
-        return `🟢 ${escapeHtml(target)} — alive (${latency}, ${res.packet_loss}% loss)`;
+        return `🟢 ${escapeHtml(target)} · alive · ${latency} · ${res.packet_loss}% loss`;
     }
-    return `🔴 ${escapeHtml(target)} — no response (${res.packet_loss}% loss)`;
+    return `🔴 ${escapeHtml(target)} · unreachable · ${res.packet_loss}% loss`;
 }
 
 async function cmdHelp() {
     return [
-        '🤖 <b>NetAIQ Bot Commands</b>',
+        '🤖 <b>NetAIQ Bot</b>',
         '',
-        '<b>📊 Status &amp; Info</b>',
-        '/status — Network health snapshot',
-        '/online — Online devices only',
-        '/offline — Offline devices only',
+        '<b>📊 Status</b>',
+        '/status — Network snapshot',
+        '/online — Devices currently up',
+        '/offline — Devices currently down',
         '/critical — Critical devices + escalating polls',
+        '/aps — Access point health',
+        '/segments — Network segments',
         '/alerts — Last 10 unread alerts',
-        '/alerts_all — Last 20 alerts (all)',
-        '/aps — UniFi access point health',
-        '/segments — Network segments summary',
+        '/alerts_all — Last 20 alerts (any state)',
         '',
         '<b>🔍 Lookups</b>',
         '/device &lt;name|ip&gt; — Device detail',
@@ -501,7 +508,7 @@ async function cmdHelp() {
         '/version — Bot version &amp; uptime',
         '/help — This message',
         '',
-        `NetAIQ v${escapeHtml(APP_VERSION)} | ${formatInUserTimezone(new Date())}`,
+        `<i>NetAIQ v${escapeHtml(APP_VERSION)} · ${escapeHtml(formatInUserTimezone(new Date()))}</i>`,
     ].join('\n');
 }
 
@@ -587,7 +594,7 @@ async function handleUpdate(update, token, allowed) {
     // throttling separate operators against each other.
     const rl = checkRateLimit('tg:cmd:' + chatId, CMD_RATE_MAX, CMD_RATE_WINDOW_MS);
     if (!rl.allowed) {
-        await sendReply(token, chatId, `⏳ Too many commands. Try again in ${rl.resetIn}s.`);
+        await sendReply(token, chatId, `⏳ Too many commands — try again in ${rl.resetIn}s.`);
         return;
     }
 
@@ -600,7 +607,7 @@ async function handleUpdate(update, token, allowed) {
 
     const handler = COMMANDS[cmd];
     if (!handler) {
-        await sendReply(token, chatId, '❓ Unknown command. Send /help for available commands.');
+        await sendReply(token, chatId, 'Unknown command. Try /help for the command list.');
         return;
     }
 
@@ -609,7 +616,7 @@ async function handleUpdate(update, token, allowed) {
         await sendChunked(token, chatId, reply, msg.message_id);
     } catch (err) {
         console.error(`[TelegramBot] error running /${cmd}:`, err.message);
-        await sendReply(token, chatId, '⚠️ Something went wrong running that command. Check server logs.');
+        await sendReply(token, chatId, '⚠️ Command failed. Check server logs for details.');
     }
 }
 
