@@ -262,7 +262,10 @@ async function sendAiFollowup(parentResult, eventType, context) {
         const aiText = await aiService.enhanceAlertWithAI(eventType, context);
         if (!aiText) return;
 
-        const followupMessage = '🤖 <b>AI Recommended Actions</b>\n' + aiText;
+        // Telegram parses HTML; a stray `<`, `>`, or `&` from the LLM would 400 the whole message.
+        // Escape line-by-line so newlines stay literal (escapeHtml doesn't touch \n).
+        const safeAiText = aiText.split('\n').map(escapeHtml).join('\n');
+        const followupMessage = '🤖 <b>AI Recommended Actions</b>\n' + safeAiText;
         await sendMessage(followupMessage, messageId);
     } catch (err) {
         console.error('Telegram AI followup error (non-blocking):', err.message);

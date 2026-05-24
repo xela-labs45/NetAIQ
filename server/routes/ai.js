@@ -5,7 +5,7 @@ const {
   parseSqliteTs
 } = require('../services/aiService');
 const alertService = require('../services/alertService');
-const { restartAiJobs, forceTriageRun, runTriageJob } = require('../jobs/aiJob');
+const { restartAiJobs, forceTriageRun, runTriageJob, isScheduleDisabled } = require('../jobs/aiJob');
 
 module.exports = async function (fastify, opts) {
   fastify.addHook('preValidation', fastify.authenticate);
@@ -61,7 +61,11 @@ module.exports = async function (fastify, opts) {
     const isStale = !latest || Date.now() - parseSqliteTs(latest.created_at) > 60 * 60 * 1000; // 60 mins
     const forceRefresh = request.query.refresh === 'true';
 
-    if (isStale || forceRefresh) {
+    // Manual and auto refresh both honour 'disabled' (matches the triage path).
+    const anomalyDisabled = isScheduleDisabled('ai_anomaly_schedule');
+    const shouldRefresh = (isStale || forceRefresh) && !anomalyDisabled;
+
+    if (shouldRefresh) {
       // Run in background
       setImmediate(async () => {
         try {
@@ -97,7 +101,8 @@ module.exports = async function (fastify, opts) {
     return reply.send({
       result: parsedResult,
       cached_at: latest?.created_at || null,
-      refreshing: isStale || forceRefresh
+      refreshing: shouldRefresh,
+      schedule_disabled: anomalyDisabled
     });
   });
 
@@ -112,8 +117,10 @@ module.exports = async function (fastify, opts) {
     // If the user simply opens the page, we only trigger a refresh IF it's older than 15m.
     const isStale = !latest || Date.now() - parseSqliteTs(latest.created_at) > 15 * 60 * 1000; // 15 mins
     const forceRefresh = request.query.refresh === 'true';
+    const triageDisabled = isScheduleDisabled('ai_triage_schedule');
+    const shouldRefresh = (isStale || forceRefresh) && !triageDisabled;
 
-    if (isStale || forceRefresh) {
+    if (shouldRefresh) {
 
       // Run in background to avoid blocking the initial data return
       setImmediate(async () => {
@@ -156,9 +163,20 @@ module.exports = async function (fastify, opts) {
     return reply.send({
       result: parsedResult,
       cached_at: latest?.created_at || null,
-      refreshing: isStale || forceRefresh
+      refreshing: shouldRefresh,
+      schedule_disabled: triageDisabled
     });
   });
+
+  // Returns a structured `reason` so the client can show a meaningful toast instead of
+  // a generic "Identification failed".
+  function identificationFailureReason() {
+    const status = getAiStatus();
+    if (!status.available) {
+      return { code: 503, reason: 'ai_unavailable', error: 'AI is not available' };
+    }
+    return { code: 500, reason: 'parse_failed', error: 'Identification failed' };
+  }
 
   fastify.post('/identify-device', async (request, reply) => {
     const { device_id } = request.body;
@@ -170,10 +188,14 @@ module.exports = async function (fastify, opts) {
     const result = await identifyDevice(device_id);
 
     if (result && result.error && result.rateLimited) {
-      return reply.code(429).send({ error: 'Rate limited', resetIn: result.resetIn });
+      return reply.code(429).send({ error: 'Rate limited', reason: 'rate_limited', resetIn: result.resetIn });
     }
 
-    return result || reply.code(500).send({ error: 'Identification failed' });
+    if (!result) {
+      const f = identificationFailureReason();
+      return reply.code(f.code).send({ error: f.error, reason: f.reason });
+    }
+    return result;
   });
 
   fastify.post('/identify-mac', async (request, reply) => {
@@ -186,10 +208,14 @@ module.exports = async function (fastify, opts) {
     const result = await identifyDiscoveredDevice(mac_address);
 
     if (result && result.error && result.rateLimited) {
-      return reply.code(429).send({ error: 'Rate limited', resetIn: result.resetIn });
+      return reply.code(429).send({ error: 'Rate limited', reason: 'rate_limited', resetIn: result.resetIn });
     }
 
-    return result || reply.code(500).send({ error: 'Identification failed' });
+    if (!result) {
+      const f = identificationFailureReason();
+      return reply.code(f.code).send({ error: f.error, reason: f.reason });
+    }
+    return result;
   });
 
   fastify.get('/unidentified-devices', async (request, reply) => {

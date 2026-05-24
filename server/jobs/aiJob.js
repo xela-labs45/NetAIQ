@@ -16,8 +16,17 @@ function isBusinessHours() {
   return hour >= 7 && hour < 19;
 }
 
+function getSchedule(scheduleKey) {
+  return settingsService.get(scheduleKey) || 'always';
+}
+
+function isScheduleDisabled(scheduleKey) {
+  return getSchedule(scheduleKey) === 'disabled';
+}
+
+// True when the cron should fire right now (also honours business_hours).
 function shouldRun(scheduleKey) {
-  const schedule = settingsService.get(scheduleKey) || 'always';
+  const schedule = getSchedule(scheduleKey);
   if (schedule === 'disabled') return false;
   if (schedule === 'business_hours') return isBusinessHours();
   return true; // 'always'
@@ -27,13 +36,25 @@ function getUnreadAlertCount() {
   return db.prepare('SELECT COUNT(*) as count FROM alerts WHERE is_read = 0').get()?.count || 0;
 }
 
+// Parse a minute-interval setting; clamp <=0 (or NaN) to null so the caller can
+// skip scheduling entirely instead of calling setInterval(0).
+function parseIntervalMins(value, fallback) {
+  const n = parseInt(value, 10);
+  if (Number.isNaN(n) || n <= 0) {
+    if (value && String(value).trim() !== '') {
+      console.warn(`AI cron interval ${JSON.stringify(value)} is invalid; using ${fallback}m`);
+    }
+    return fallback;
+  }
+  return n;
+}
+
 function startAiJobs(fastify) {
   // Reset tracking state on restart
   lastTriageUnreadCount = null;
 
-  // Read intervals from settings (in minutes), convert to ms. Fallback 10m / 5m.
-  const anomalyMins = parseInt(settingsService.get('ai_anomaly_interval') || '10', 10);
-  const triageMins = parseInt(settingsService.get('ai_triage_interval') || '5', 10);
+  const anomalyMins = parseIntervalMins(settingsService.get('ai_anomaly_interval'), 10);
+  const triageMins = parseIntervalMins(settingsService.get('ai_triage_interval'), 5);
 
   // Anomaly detection job
   anomalyTimer = setInterval(async () => {
@@ -94,7 +115,9 @@ async function runTriageJob(fastify, forced = false) {
   const status = getAiStatus();
   if (!status.available) return { skipped: true, reason: 'ai_unavailable' };
 
-  // Background jobs also check schedule settings
+  // 'disabled' is an explicit user preference — honour it even on manual runs.
+  // Cron also skips during off-hours via shouldRun(); manual runs only check the disabled gate.
+  if (isScheduleDisabled('ai_triage_schedule')) return { skipped: true, reason: 'schedule_disabled' };
   if (!forced && !shouldRun('ai_triage_schedule')) return { skipped: true, reason: 'scheduled_off' };
 
   const currentUnread = getUnreadAlertCount();
@@ -145,4 +168,4 @@ async function forceTriageRun(fastify) {
   return await runTriageJob(fastify, true);
 }
 
-module.exports = { startAiJobs, restartAiJobs, forceTriageRun, runTriageJob };
+module.exports = { startAiJobs, restartAiJobs, forceTriageRun, runTriageJob, isScheduleDisabled };

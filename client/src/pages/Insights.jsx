@@ -4,7 +4,8 @@ import {
     Chip, Table, TableBody, TableCell, TableHead, TableRow,
     List, ListItem, ListItemIcon, ListItemText,
     CircularProgress, IconButton, Tooltip, Collapse,
-    Snackbar, Alert, AlertTitle
+    Snackbar, Alert, AlertTitle,
+    Dialog, DialogTitle, DialogContent, DialogContentText, DialogActions
 } from '@mui/material';
 import {
     AutoAwesome as AiIcon,
@@ -30,9 +31,13 @@ export default function Insights() {
     const [expandedAlert, setExpandedAlert] = useState(null);
     const [identifyState, setIdentifyState] = useState({}); // { [id]: 'idle'|'loading'|'success'|'error' }
     const [countdowns, setCountdowns] = useState({}); // { [id]: number }
-    const [running, setRunning] = useState(false);
+    // Per-type running state — a single bool was cleared by the first ai:analysis_complete
+    // and dropped the spinner while the other analysis was still in flight.
+    const [running, setRunning] = useState({ anomaly: false, triage: false });
     const [lastCallFailed, setLastCallFailed] = useState(false);
     const [toast, setToast] = useState({ open: false, message: '', severity: 'info' });
+    const [dismissDialogOpen, setDismissDialogOpen] = useState(false);
+    const anyRunning = running.anomaly || running.triage;
 
     const socket = useSocket();
 
@@ -44,14 +49,21 @@ export default function Insights() {
     useEffect(() => {
         if (!socket) return;
         const handleAnalysisComplete = ({ type }) => {
-            if (type === 'anomaly') queryClient.invalidateQueries({ queryKey: ['anomalies'] });
-            if (type === 'alert_triage') queryClient.invalidateQueries({ queryKey: ['alerts'] });
+            if (type === 'anomaly') {
+                queryClient.invalidateQueries({ queryKey: ['ai', 'anomalies'] });
+                setRunning(prev => ({ ...prev, anomaly: false }));
+            }
+            if (type === 'alert_triage') {
+                queryClient.invalidateQueries({ queryKey: ['ai', 'alert-triage'] });
+                setRunning(prev => ({ ...prev, triage: false }));
+            }
             setLastCallFailed(false);
-            setRunning(false);
         };
-        const handleAnalysisError = ({ message }) => {
+        const handleAnalysisError = ({ type, message }) => {
             setLastCallFailed(true);
-            setRunning(false);
+            if (type === 'anomaly') setRunning(prev => ({ ...prev, anomaly: false }));
+            else if (type === 'alert_triage') setRunning(prev => ({ ...prev, triage: false }));
+            else setRunning({ anomaly: false, triage: false });
             showToast(`Analysis failed: ${message}`, 'error');
         };
         socket.on('ai:analysis_complete', handleAnalysisComplete);
@@ -83,24 +95,28 @@ export default function Insights() {
         return () => clearInterval(timer);
     }, []);
 
-    // Queries
+    // Queries — namespaced under ['ai', ...] so they don't collide with the Alerts page's ['alerts'].
     const { data: aiStatus } = useQuery({
-        queryKey: ['aiStatus'],
+        queryKey: ['ai', 'status'],
         queryFn: () => axios.get('/api/v1/ai/status').then(res => res.data),
     });
 
     const anomaliesQuery = useQuery({
-        queryKey: ['anomalies'],
+        queryKey: ['ai', 'anomalies'],
         queryFn: () => axios.get('/api/v1/ai/anomalies').then(res => res.data),
+        // Override the project-wide refetchOnWindowFocus:false default so the page
+        // recovers from silent socket disconnects when the user tabs back in.
+        refetchOnWindowFocus: true,
     });
 
     const alertsQuery = useQuery({
-        queryKey: ['alerts'],
+        queryKey: ['ai', 'alert-triage'],
         queryFn: () => axios.get('/api/v1/ai/alert-summary').then(res => res.data),
+        refetchOnWindowFocus: true,
     });
 
     const unidentifiedQuery = useQuery({
-        queryKey: ['unidentified'],
+        queryKey: ['ai', 'unidentified'],
         queryFn: () => axios.get('/api/v1/ai/unidentified-devices').then(res => res.data),
     });
 
@@ -121,41 +137,62 @@ export default function Insights() {
     const executiveSummary = resultT?.executive_summary;
     const isUrgent = resultT?.urgent_action_required;
     const noiseAlerts = resultT?.noise_alerts ?? [];
+    const noiseExplanation = resultT?.noise_explanation;
 
     const unidentifiedDevices = unidentifiedQuery.data || [];
 
-    // Identification (FIX 4)
+    // Map structured server error reasons to user-facing toasts.
+    const IDENTIFY_ERROR_MESSAGES = {
+        ai_unavailable: 'AI is disabled — enable it in Settings → AI.',
+        parse_failed: 'AI returned an unrecognised response. Try again in a moment.',
+        rate_limited: 'Rate limit reached. Try again shortly.'
+    };
+
     const handleIdentify = async (deviceId) => {
         setIdentifyState(prev => ({ ...prev, [deviceId]: 'loading' }));
         try {
-            const res = await axios.post('/api/v1/ai/identify-device', { device_id: deviceId });
+            await axios.post('/api/v1/ai/identify-device', { device_id: deviceId });
             setIdentifyState(prev => ({ ...prev, [deviceId]: 'success' }));
-            queryClient.invalidateQueries(['unidentified']);
+            queryClient.invalidateQueries({ queryKey: ['ai', 'unidentified'] });
             showToast('Device identified successfully', 'success');
         } catch (err) {
+            const body = err.response?.data || {};
             if (err.response?.status === 429) {
-                const resetIn = err.response.data.resetIn || 60;
+                const resetIn = body.resetIn || 60;
                 showToast(`Rate limit reached. Try again in ${resetIn}s.`, 'warning');
                 setCountdowns(prev => ({ ...prev, [deviceId]: resetIn }));
                 setIdentifyState(prev => ({ ...prev, [deviceId]: 'error' }));
             } else {
                 setIdentifyState(prev => ({ ...prev, [deviceId]: 'error' }));
-                showToast(err.response?.data?.error || 'Identification failed', 'error');
+                const friendly = IDENTIFY_ERROR_MESSAGES[body.reason] || body.error || 'Identification failed';
+                showToast(friendly, 'error');
             }
         }
     };
 
     const handleRunAnalysis = async () => {
-        setRunning(true);
+        setRunning({ anomaly: true, triage: true });
         try {
-            await Promise.all([
+            const [anomaliesRes, alertsRes] = await Promise.all([
                 axios.get('/api/v1/ai/anomalies', { params: { refresh: true } }),
                 axios.get('/api/v1/ai/alert-summary', { params: { refresh: true } })
             ]);
+            // Server honours ai_*_schedule='disabled' even on manual runs — surface that to the user.
+            if (anomaliesRes.data?.schedule_disabled && alertsRes.data?.schedule_disabled) {
+                setRunning({ anomaly: false, triage: false });
+                showToast('AI analysis schedules are set to "disabled" in Settings.', 'warning');
+                return;
+            }
+            if (anomaliesRes.data?.schedule_disabled) {
+                setRunning(prev => ({ ...prev, anomaly: false }));
+            }
+            if (alertsRes.data?.schedule_disabled) {
+                setRunning(prev => ({ ...prev, triage: false }));
+            }
             showToast('Analysis started · Results update automatically', 'info');
         } catch (err) {
             showToast('Failed to start analysis: ' + (err.response?.data?.error || err.message), 'error');
-            setRunning(false);
+            setRunning({ anomaly: false, triage: false });
         }
     };
 
@@ -164,16 +201,17 @@ export default function Insights() {
         try {
             await axios.post('/api/v1/ai/dismiss-noise', { alert_ids: noiseAlerts });
             showToast(`Dismissed ${noiseAlerts.length} noise alerts`, 'success');
-            queryClient.invalidateQueries(['alerts']);
+            queryClient.invalidateQueries({ queryKey: ['ai', 'alert-triage'] });
         } catch (err) {
             showToast('Failed to dismiss noise: ' + err.message, 'error');
+        } finally {
+            setDismissDialogOpen(false);
         }
     };
 
-    const handleRefresh = () => {
-        anomaliesQuery.refetch();
-        alertsQuery.refetch();
-    };
+    // The refresh icon next to "Run Full Analysis" used to only refetch the cached row.
+    // Make it actually trigger a fresh analysis.
+    const handleRefresh = handleRunAnalysis;
 
     // UI Helpers (FIX 2A / 2C)
     const getConfidenceColor = (conf) => ({ high: 'success', medium: 'warning', low: 'default' }[conf] || 'default');
@@ -230,10 +268,16 @@ export default function Insights() {
                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 1 }}>
                         <AiIcon color="primary" sx={{ fontSize: 32 }} />
                         <Typography variant="h4" fontWeight="bold">AI Insights</Typography>
-                        {(isFetchingAnalysis || running) && <CircularProgress size={20} />}
+                        {(isFetchingAnalysis || anyRunning) && <CircularProgress size={20} />}
                     </Box>
                     <Typography variant="body2" color="text.secondary">
-                        Network intelligence powered by {aiStatus?.provider === 'anthropic' ? 'Anthropic Claude' : 'OpenRouter'}.
+                        Network intelligence powered by {
+                            (aiStatus?.provider === 'anthropic' || aiStatus?.provider === 'claude')
+                                ? 'Anthropic Claude'
+                                : aiStatus?.provider === 'openrouter'
+                                    ? 'OpenRouter'
+                                    : 'your AI provider'
+                        }.
                     </Typography>
                 </Box>
                 <Box sx={{ display: 'flex', gap: 2 }}>
@@ -241,14 +285,18 @@ export default function Insights() {
                         variant="contained"
                         startIcon={<AiIcon />}
                         onClick={handleRunAnalysis}
-                        disabled={running || loadingAnalysis}
+                        disabled={anyRunning || loadingAnalysis}
                         sx={{ borderRadius: 2, px: 3 }}
                     >
-                        {running ? 'Analysing...' : 'Run Full Analysis'}
+                        {anyRunning ? 'Analysing...' : 'Run Full Analysis'}
                     </Button>
-                    <IconButton onClick={handleRefresh} disabled={isFetchingAnalysis}>
-                        <RefreshIcon />
-                    </IconButton>
+                    <Tooltip title="Re-run analysis">
+                        <span>
+                            <IconButton onClick={handleRefresh} disabled={anyRunning || isFetchingAnalysis}>
+                                <RefreshIcon />
+                            </IconButton>
+                        </span>
+                    </Tooltip>
                 </Box>
             </Box>
 
@@ -270,8 +318,13 @@ export default function Insights() {
                             <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
                                 <Typography variant="h6">Network Health</Typography>
                                 <Chip
-                                    label={`${healthScore || 0}/100`}
-                                    color={healthScore > 80 ? 'success' : healthScore > 50 ? 'warning' : 'error'}
+                                    label={healthScore == null ? 'No data' : `${healthScore}/100`}
+                                    color={
+                                        healthScore == null ? 'default'
+                                            : healthScore > 80 ? 'success'
+                                                : healthScore > 50 ? 'warning'
+                                                    : 'error'
+                                    }
                                     sx={{ fontWeight: 'bold' }}
                                 />
                             </Box>
@@ -479,7 +532,7 @@ export default function Insights() {
                                 size="small"
                                 variant="outlined"
                                 color="inherit"
-                                onClick={handleDismissNoise}
+                                onClick={() => setDismissDialogOpen(true)}
                                 disabled={noiseAlerts.length === 0}
                             >
                                 Dismiss All Noise
@@ -488,6 +541,27 @@ export default function Insights() {
                     </Card>
                 </Grid>
             </Grid>
+
+            {/* Confirm before bulk-dismissing noisy alerts (F7) */}
+            <Dialog open={dismissDialogOpen} onClose={() => setDismissDialogOpen(false)}>
+                <DialogTitle>Dismiss {noiseAlerts.length} noise alerts?</DialogTitle>
+                <DialogContent>
+                    <DialogContentText sx={{ mb: 2 }}>
+                        These alerts will be marked as read. This cannot be undone from this page.
+                    </DialogContentText>
+                    {noiseExplanation && (
+                        <Alert severity="info" variant="outlined">
+                            {noiseExplanation}
+                        </Alert>
+                    )}
+                </DialogContent>
+                <DialogActions>
+                    <Button onClick={() => setDismissDialogOpen(false)}>Cancel</Button>
+                    <Button onClick={handleDismissNoise} variant="contained" color="warning">
+                        Dismiss {noiseAlerts.length}
+                    </Button>
+                </DialogActions>
+            </Dialog>
 
             {/* Notifications */}
             <Snackbar open={toast.open} autoHideDuration={6000} onClose={() => setToast({ ...toast, open: false })}>

@@ -40,6 +40,10 @@ const MODEL_CACHE_TTL = 3600000;   // 1 hour
 let anomalyInFlight = false;
 let triageInFlight = false;
 
+// Defaults applied only when the user hasn't picked a model. Stay in sync with CLAUDE_FALLBACK below.
+const DEFAULT_CLAUDE_MODEL = 'claude-sonnet-4-6';
+const DEFAULT_OPENROUTER_MODEL = 'mistralai/mistral-7b-instruct';
+
 // SQLite CURRENT_TIMESTAMP returns 'YYYY-MM-DD HH:MM:SS' in UTC with no zone marker.
 // new Date() parses that as local time, so cache-freshness math drifts by the host UTC offset.
 // Same convention as alertService.js:82 and pingService.js:150.
@@ -48,21 +52,55 @@ function parseSqliteTs(s) {
   return new Date(s.replace(' ', 'T') + 'Z').getTime();
 }
 
+// Find the first balanced JSON value (object or array) starting at or after `from`.
+// Respects strings and escapes; ignores braces inside string literals.
+function extractBalancedJson(text, from = 0) {
+  let i = from;
+  while (i < text.length) {
+    const c = text[i];
+    if (c !== '{' && c !== '[') { i++; continue; }
+    const open = c, close = c === '{' ? '}' : ']';
+    let depth = 0, inStr = false, escape = false;
+    for (let j = i; j < text.length; j++) {
+      const ch = text[j];
+      if (inStr) {
+        if (escape) { escape = false; }
+        else if (ch === '\\') { escape = true; }
+        else if (ch === '"') { inStr = false; }
+        continue;
+      }
+      if (ch === '"') { inStr = true; continue; }
+      if (ch === open) depth++;
+      else if (ch === close) {
+        depth--;
+        if (depth === 0) return text.slice(i, j + 1);
+      }
+    }
+    i++; // unbalanced — try next candidate
+  }
+  return null;
+}
+
 function safeJsonParse(text) {
   if (!text) return null;
+  const stripped = text.replace(/```json|```/g, '').trim();
   try {
-    const clean = text.replace(/```json|```/g, '').trim();
-    return JSON.parse(clean);
-  } catch {
+    return JSON.parse(stripped);
+  } catch { /* fall through */ }
+
+  // Walk the string looking for balanced JSON values; return the first that parses.
+  let cursor = 0;
+  while (cursor < stripped.length) {
+    const candidate = extractBalancedJson(stripped, cursor);
+    if (!candidate) break;
     try {
-      // Find JSON array or object
-      const match = text.match(/(\[[\s\S]*\]|\{[\s\S]*\})/);
-      return match ? JSON.parse(match[0]) : null;
+      return JSON.parse(candidate);
     } catch {
-      console.warn('AI JSON parse failed:', text.slice(0, 200));
-      return null;
+      cursor = stripped.indexOf(candidate[0], cursor) + 1;
     }
   }
+  console.warn('AI JSON parse failed:', text.slice(0, 200));
+  return null;
 }
 
 function checkRateLimit(key, maxCalls = 5, windowMs = 60000) {
@@ -131,10 +169,8 @@ function isAnthropicProvider(provider) {
 
 function getAiStatus() {
   const provider = settingsService.get('ai_provider') || 'none';
-  // settingsService stores booleans as '1'/'0'; '0'/'false' are the only disabling values.
-  // null/missing reads as enabled, matching Settings.jsx default and the UI's `!== '0'` convention.
-  const enabledRaw = settingsService.get('ai_enabled');
-  const enabled = enabledRaw !== '0' && enabledRaw !== 'false';
+  // Default true — matches Settings.jsx (ai_enabled: true at line 101).
+  const enabled = settingsService.getBool('ai_enabled', true);
   const model = settingsService.get('ai_model') || null;
 
   const hasKey = isAnthropicProvider(provider)
@@ -156,14 +192,21 @@ function getAiStatus() {
     available: enabled && provider !== 'none' && hasKey,
     unavailable_reason,
     provider,
-    model: model || (isAnthropicProvider(provider) ? 'claude-3-5-sonnet-20241022' : 'mistralai/mistral-7b-instruct'),
+    model: model || (isAnthropicProvider(provider) ? DEFAULT_CLAUDE_MODEL : DEFAULT_OPENROUTER_MODEL),
     enabled
   };
 }
 
+// Internal callers receive { text, transient } so safeCallAI can decide whether to retry.
+// External callers (the rest of the module) unwrap to text via callAI().
 async function callAI(systemPrompt, userPrompt, maxTokens = 1024, signal) {
+  const result = await callAIDetailed(systemPrompt, userPrompt, maxTokens, signal);
+  return result.text;
+}
+
+async function callAIDetailed(systemPrompt, userPrompt, maxTokens = 1024, signal) {
   const status = getAiStatus();
-  if (!status.available) return null;
+  if (!status.available) return { text: null, transient: false };
 
   if (isAnthropicProvider(status.provider)) {
     return await callClaude(systemPrompt, userPrompt, maxTokens, status.model, signal);
@@ -171,24 +214,24 @@ async function callAI(systemPrompt, userPrompt, maxTokens = 1024, signal) {
   if (status.provider === 'openrouter') {
     return await callOpenRouter(systemPrompt, userPrompt, maxTokens, status.model, signal);
   }
-  return null;
+  return { text: null, transient: false };
 }
 
 async function safeCallAI(systemPrompt, userPrompt, maxTokens) {
-  let result = await callAI(systemPrompt, userPrompt, maxTokens);
-  if (result) return result;
+  const first = await callAIDetailed(systemPrompt, userPrompt, maxTokens);
+  if (first.text || !first.transient) return first.text;
 
-  // Retry once after 1.5 seconds
+  // Retry once after 1.5 s only for transient failures (timeout, 5xx, network).
   await new Promise(r => setTimeout(r, 1500));
-  result = await callAI(systemPrompt, userPrompt, maxTokens);
-  return result;  // null if both attempts failed
+  const second = await callAIDetailed(systemPrompt, userPrompt, maxTokens);
+  return second.text;
 }
 
 async function callClaude(systemPrompt, userPrompt, maxTokens, model, signal) {
   const apiKey = settingsService.get('ai_anthropic_key') || settingsService.get('ai_claude_key');
-  if (!apiKey) return null;
+  if (!apiKey) return { text: null, transient: false };
 
-  const resolvedModel = model || 'claude-3-5-sonnet-20241022';
+  const resolvedModel = model || DEFAULT_CLAUDE_MODEL;
   try {
     // timeout caps any single attempt; maxRetries: 1 prevents the SDK's default 2-retry
     // amplification of timeout/5xx spend (the cron's running flag would also stay pinned).
@@ -199,28 +242,38 @@ async function callClaude(systemPrompt, userPrompt, maxTokens, model, signal) {
       system: systemPrompt,
       messages: [{ role: 'user', content: userPrompt }]
     }, signal ? { signal } : undefined);
-    return response.content[0]?.text || null;
+    return { text: response.content[0]?.text || null, transient: false };
   } catch (err) {
-    if (err.name === 'AbortError') return null;
+    if (err.name === 'AbortError' || err.name === 'APIUserAbortError') {
+      return { text: null, transient: false };   // caller cancelled — don't retry
+    }
+    const transient = !err.status                       // connection/timeout (no HTTP status)
+      || err.status === 429                              // rate limited
+      || err.status >= 500;                              // server-side
     console.error('Claude API error:', err.message);
-    return null;
+    return { text: null, transient };
   }
 }
 
 async function callOpenRouter(systemPrompt, userPrompt, maxTokens, model, externalSignal) {
   const apiKey = settingsService.get('ai_openrouter_key');
-  if (!apiKey) return null;
+  if (!apiKey) return { text: null, transient: false };
 
-  const resolvedModel = model || 'mistralai/mistral-7b-instruct';
+  const resolvedModel = model || DEFAULT_OPENROUTER_MODEL;
   // Internal 15 s ceiling, OR-ed with any caller-supplied signal so an upstream
   // cancellation (e.g. enhanceAlertWithAI's 10 s budget) aborts the underlying fetch too.
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 15000);
+  let timedOut = false;
+  const timeout = setTimeout(() => { timedOut = true; controller.abort(); }, 15000);
   const onExternalAbort = () => controller.abort();
   if (externalSignal) {
     if (externalSignal.aborted) controller.abort();
     else externalSignal.addEventListener('abort', onExternalAbort, { once: true });
   }
+  const cleanup = () => {
+    clearTimeout(timeout);
+    if (externalSignal) externalSignal.removeEventListener('abort', onExternalAbort);
+  };
 
   try {
     const response = await fetch(
@@ -244,24 +297,24 @@ async function callOpenRouter(systemPrompt, userPrompt, maxTokens, model, extern
         signal: controller.signal
       }
     );
-    clearTimeout(timeout);
-    if (externalSignal) externalSignal.removeEventListener('abort', onExternalAbort);
+    cleanup();
 
     if (!response.ok) {
-      clearTimeout(timeout);
-      if (externalSignal) externalSignal.removeEventListener('abort', onExternalAbort);
       const err = await response.json().catch(() => ({}));
       console.error('OpenRouter error:', err);
-      return null;
+      const transient = response.status === 429 || response.status >= 500;
+      return { text: null, transient };
     }
     const data = await response.json();
-    return data.choices?.[0]?.message?.content || null;
+    return { text: data.choices?.[0]?.message?.content || null, transient: false };
   } catch (err) {
-    clearTimeout(timeout);
-    if (externalSignal) externalSignal.removeEventListener('abort', onExternalAbort);
-    if (err.name === 'AbortError') return null;
+    cleanup();
+    if (err.name === 'AbortError') {
+      // Internal 15 s timeout is transient; external (caller) cancel is not.
+      return { text: null, transient: timedOut };
+    }
     console.error('OpenRouter error:', err.message);
-    return null;
+    return { text: null, transient: true };   // network errors are retry-worthy
   }
 }
 
@@ -273,7 +326,7 @@ async function testConnection(provider, apiKey, model) {
     if (isAnthropicProvider(provider)) {
       const client = new Anthropic({ apiKey, timeout: 15000, maxRetries: 1 });
       const r = await client.messages.create({
-        model: model || 'claude-3-5-sonnet-20241022',
+        model: model || DEFAULT_CLAUDE_MODEL,
         max_tokens: 20,
         messages: [{ role: 'user', content: testPrompt }]
       });
@@ -294,7 +347,7 @@ async function testConnection(provider, apiKey, model) {
             'X-Title': 'NetAIQ Network Dashboard'
           },
           body: JSON.stringify({
-            model: model || 'mistralai/mistral-7b-instruct',
+            model: model || DEFAULT_OPENROUTER_MODEL,
             max_tokens: 20,
             messages: [{ role: 'user', content: testPrompt }]
           }),
@@ -309,18 +362,25 @@ async function testConnection(provider, apiKey, model) {
       result = data.choices?.[0]?.message?.content;
     }
 
-    return result?.includes('ok')
-      ? { success: true }
-      : { success: false, error: 'Unexpected response: ' + result };
+    // Strict success: a JSON {"status":"ok"} reply. Fall back to substring as a leniency.
+    if (result) {
+      const parsed = safeJsonParse(result);
+      if (parsed?.status === 'ok') return { success: true };
+      // Substring fallback for models that paraphrase ("Status: ok", "{ok}").
+      if (/(^|\W)ok(\W|$)/i.test(result)) return { success: true };
+    }
+    return { success: false, error: 'Unexpected response: ' + result };
   } catch (err) {
     return { success: false, error: err.message };
   }
 }
 
+// Used only when fetching the live model list fails (no API key, network error).
+// Keep the default-Sonnet entry first so it lands at the top of the dropdown.
 const CLAUDE_FALLBACK = [
-  { id: 'claude-3-opus-20240229', label: 'Claude 3 Opus', is_free: false, provider: 'claude' },
-  { id: 'claude-3-5-sonnet-20241022', label: 'Claude 3.5 Sonnet', is_free: false, provider: 'claude' },
-  { id: 'claude-3-5-haiku-20241022', label: 'Claude 3.5 Haiku', is_free: false, provider: 'claude' }
+  { id: DEFAULT_CLAUDE_MODEL, label: 'Claude Sonnet 4.6', is_free: false, provider: 'claude' },
+  { id: 'claude-opus-4-7', label: 'Claude Opus 4.7', is_free: false, provider: 'claude' },
+  { id: 'claude-haiku-4-5-20251001', label: 'Claude Haiku 4.5', is_free: false, provider: 'claude' }
 ];
 
 const OPENROUTER_FALLBACK = [
@@ -644,15 +704,15 @@ Return this exact JSON:
 }
 
 function getUnidentifiedDevices() {
+  // Devices that have never been analysed. Devices the LLM already returned 'other' for
+  // stay out of this list — otherwise users burn AI calls in a loop on the same device.
+  // Hostname is a hint, not a gate (an analysed device with no hostname is still "identified").
   return db.prepare(`
     SELECT d.id, d.hostname, d.ip_address, d.mac_address, d.device_type, s.name as segment_name
     FROM devices d
     LEFT JOIN segments s ON s.id = d.segment_id
     LEFT JOIN ai_device_identifications ai ON ai.device_id = d.id
     WHERE ai.id IS NULL
-       OR d.device_type = 'other'
-       OR d.hostname IS NULL
-       OR d.hostname = ''
     ORDER BY d.created_at DESC
             `).all();
 }
@@ -679,23 +739,25 @@ async function detectAnomalies(forceRefresh = false) {
 }
 
 async function runAnomalyDetection() {
+  // Predicate on p.timestamp lives in the JOIN ON so the planner can use idx_ping_history_timestamp.
+  // Without this, GROUP BY d.id scans the whole ping_history table even though we only need 7 days.
   const deviceStats = db.prepare(`
-        SELECT
-        d.id,
-            d.hostname || ' (' || d.ip_address || ')' as device_label,
-            d.is_critical,
-            s.name as segment,
-            ROUND(AVG(CASE WHEN p.timestamp > datetime('now', '-24 hours') THEN p.latency_ms END), 1) as avg_24h,
-            ROUND(AVG(CASE WHEN p.timestamp > datetime('now', '-7 days') THEN p.latency_ms END), 1) as avg_7d,
-            ROUND(MAX(CASE WHEN p.timestamp > datetime('now', '-24 hours') THEN p.latency_ms END), 1) as max_24h,
-            SUM(CASE WHEN p.status = 'down' AND p.timestamp > datetime('now', '-24 hours') THEN 1 ELSE 0 END) as downs_24h,
-            COUNT(CASE WHEN p.timestamp > datetime('now', '-24 hours') THEN 1 END) as pings_24h
+    SELECT
+      d.id,
+      d.hostname || ' (' || d.ip_address || ')' as device_label,
+      d.is_critical,
+      s.name as segment,
+      ROUND(AVG(CASE WHEN p.timestamp > datetime('now', '-24 hours') THEN p.latency_ms END), 1) as avg_24h,
+      ROUND(AVG(p.latency_ms), 1) as avg_7d,
+      ROUND(MAX(CASE WHEN p.timestamp > datetime('now', '-24 hours') THEN p.latency_ms END), 1) as max_24h,
+      SUM(CASE WHEN p.status = 'down' AND p.timestamp > datetime('now', '-24 hours') THEN 1 ELSE 0 END) as downs_24h,
+      COUNT(CASE WHEN p.timestamp > datetime('now', '-24 hours') THEN 1 END) as pings_24h
     FROM devices d
-    LEFT JOIN ping_history p ON p.device_id = d.id
+    LEFT JOIN ping_history p ON p.device_id = d.id AND p.timestamp > datetime('now', '-7 days')
     LEFT JOIN segments s ON s.id = d.segment_id
     GROUP BY d.id
     HAVING pings_24h > 5
-            `).all();
+  `).all();
 
   const recentAlerts = db.prepare(`
         SELECT
@@ -961,9 +1023,8 @@ async function enhanceAlertWithAI(eventType, context) {
     const status = getAiStatus();
     if (!status.available) return null;
 
-    // Check the telegram_ai_enhanced setting
-    const aiEnhanced = settingsService.get('telegram_ai_enhanced');
-    if (aiEnhanced !== '1') return null;
+    // Check the telegram_ai_enhanced setting (off by default)
+    if (!settingsService.getBool('telegram_ai_enhanced', false)) return null;
 
     // Global cap to bound AI cost during alert bursts (e.g. switch failure cascades 20 alerts).
     // When exceeded, base alert still ships — AI section is just skipped.

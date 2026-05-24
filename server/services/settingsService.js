@@ -1,5 +1,10 @@
 const db = require('../db/database');
 
+// Boolean settings are stored as '1'/'0' by `set`, but legacy values and direct
+// SQL writes may use 'true'/'false', 'yes'/'no', etc. Normalize on read.
+const TRUE_VALUES = new Set(['1', 'true', 'yes', 'on']);
+const FALSE_VALUES = new Set(['0', 'false', 'no', 'off', '', null, undefined]);
+
 const settingsService = {
     get: (key) => {
         try {
@@ -9,6 +14,15 @@ const settingsService = {
             console.error(`Error reading setting ${key}:`, err);
             return null;
         }
+    },
+
+    getBool: (key, defaultValue = false) => {
+        const raw = settingsService.get(key);
+        if (raw === null || raw === undefined || raw === '') return defaultValue;
+        const v = String(raw).toLowerCase();
+        if (TRUE_VALUES.has(v)) return true;
+        if (FALSE_VALUES.has(v)) return false;
+        return defaultValue;
     },
 
     set: (key, value) => {
