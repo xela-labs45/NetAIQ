@@ -12,6 +12,71 @@ const segmentSchema = z.object({
     color: z.string().optional().nullable()
 });
 
+function parseCidr(cidr) {
+    try {
+        return new Netmask(cidr);
+    } catch (_) {
+        return null;
+    }
+}
+
+function blocksOverlap(a, b) {
+    return a.contains(b.base) || b.contains(a.base);
+}
+
+function findOverlappingSegments(cidr, excludeId = null) {
+    const block = parseCidr(cidr);
+    if (!block) {
+        return { invalid: true, conflicts: [] };
+    }
+
+    const segments = db.prepare('SELECT id, name, cidr FROM segments WHERE (? IS NULL OR id != ?)').all(excludeId, excludeId);
+    const conflicts = [];
+    for (const segment of segments) {
+        const existingBlock = parseCidr(segment.cidr);
+        if (!existingBlock) continue;
+        if (blocksOverlap(block, existingBlock)) {
+            conflicts.push(segment);
+        }
+    }
+    return { invalid: false, conflicts };
+}
+
+function getExistingOverlapConflicts(segments) {
+    const conflicts = [];
+    for (let i = 0; i < segments.length; i++) {
+        const leftBlock = parseCidr(segments[i].cidr);
+        if (!leftBlock) continue;
+        for (let j = i + 1; j < segments.length; j++) {
+            const rightBlock = parseCidr(segments[j].cidr);
+            if (!rightBlock) continue;
+            if (blocksOverlap(leftBlock, rightBlock)) {
+                conflicts.push({
+                    segment_id: segments[i].id,
+                    segment_name: segments[i].name,
+                    segment_cidr: segments[i].cidr,
+                    conflicts_with_id: segments[j].id,
+                    conflicts_with_name: segments[j].name,
+                    conflicts_with_cidr: segments[j].cidr
+                });
+            }
+        }
+    }
+    return conflicts;
+}
+
+function validateSegmentCidr(cidr, excludeId = null) {
+    const overlap = findOverlappingSegments(cidr, excludeId);
+    if (overlap.invalid) {
+        return 'Invalid CIDR notation';
+    }
+    if (overlap.conflicts.length > 0) {
+        const conflict = overlap.conflicts[0];
+        return `Segment CIDR overlaps with "${conflict.name}" (${conflict.cidr}).`;
+    }
+    return null;
+}
+
 module.exports = async function (fastify, opts) {
     fastify.addHook('preValidation', fastify.authenticate);
 
@@ -29,8 +94,10 @@ module.exports = async function (fastify, opts) {
         const onlineDevices = await mergeService.mergeOnlineDevices();
 
         const enrichedSegments = segments.map(seg => {
-            const block = new Netmask(seg.cidr);
-            const online_count = onlineDevices.filter(d => d.ip && block.contains(d.ip)).length;
+            const block = parseCidr(seg.cidr);
+            const online_count = block
+                ? onlineDevices.filter(d => d.ip && block.contains(d.ip)).length
+                : 0;
 
             return {
                 ...seg,
@@ -40,7 +107,10 @@ module.exports = async function (fastify, opts) {
             };
         });
 
-        reply.send({ segments: enrichedSegments });
+        reply.send({
+            segments: enrichedSegments,
+            overlap_conflicts: getExistingOverlapConflicts(segments)
+        });
     });
 
     fastify.post('/', async (request, reply) => {
@@ -53,6 +123,11 @@ module.exports = async function (fastify, opts) {
         }
 
         const { name, cidr, description, color } = validation.data;
+        const cidrError = validateSegmentCidr(cidr);
+        if (cidrError) {
+            return reply.code(400).send({ error: true, message: cidrError });
+        }
+
         try {
             const stmt = db.prepare('INSERT INTO segments (name, cidr, description, color) VALUES (?, ?, ?, ?)');
             const info = stmt.run(name, cidr, description || null, color || null);
@@ -75,6 +150,11 @@ module.exports = async function (fastify, opts) {
         }
 
         const { name, cidr, description, color } = validation.data;
+        const cidrError = validateSegmentCidr(cidr, Number(id));
+        if (cidrError) {
+            return reply.code(400).send({ error: true, message: cidrError });
+        }
+
         db.prepare('UPDATE segments SET name = ?, cidr = ?, description = ?, color = ? WHERE id = ?')
             .run(name, cidr, description || null, color || null, id);
         const segment = db.prepare('SELECT * FROM segments WHERE id = ?').get(id);

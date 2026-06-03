@@ -309,6 +309,10 @@ function upsertDevice(device) {
         console.log(`[Discovery] Detected randomized MAC: ${mac} (IP: ${device.ip}, Source: ${device.source})`);
     }
 
+    const hasIpForSegment = !!device.ip;
+    const resolvedSegment = hasIpForSegment ? findSegmentForIp(device.ip) : null;
+    const resolvedSegmentId = resolvedSegment?.id || null;
+
     const existing = db.prepare(
         'SELECT id, last_ip, hostname, ai_identified FROM discovered_devices WHERE mac_address = ?'
     ).get(mac);
@@ -330,7 +334,7 @@ function upsertDevice(device) {
                 hostname   = COALESCE(?, hostname),
                 is_wired   = COALESCE(?, is_wired),
                 source     = ?,
-                segment_id = COALESCE(?, segment_id),
+                segment_id = CASE WHEN ? THEN ? ELSE segment_id END,
                 vendor     = COALESCE(?, vendor),
                 last_seen  = CURRENT_TIMESTAMP
             WHERE mac_address = ?
@@ -339,7 +343,8 @@ function upsertDevice(device) {
             device.hostname || null,
             device.is_wired ?? null,
             device.source,
-            device.segment_id || null,
+            hasIpForSegment ? 1 : 0,
+            resolvedSegmentId,
             vendorUpdate || null,
             mac
         );
@@ -364,7 +369,7 @@ function upsertDevice(device) {
                 device.hostname || null,
                 device.is_wired ?? null,
                 device.source,
-                device.segment_id || null,
+                resolvedSegmentId,
                 vendor || null
             );
             macTrackingStats.inserted++;

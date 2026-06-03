@@ -1,21 +1,10 @@
 const db = require('../db/database');
 const { z } = require('zod');
-const { Netmask } = require('netmask');
 const { pingDevice } = require('../services/pingService');
 const { mergeOnlineDevices, getOnlineCount } = require('../services/mergeService');
 const { lookupMac, normaliseMac } = require('../services/macOuiService');
 const { toSqliteTimestamp, safeError } = require('../utils/dateFormatter');
-
-function detectSegmentForIp(ip) {
-    const segments = db.prepare('SELECT id, name, cidr FROM segments').all();
-    for (const seg of segments) {
-        try {
-            const block = new Netmask(seg.cidr);
-            if (block.contains(ip)) return seg;
-        } catch (_) { /* skip malformed CIDRs */ }
-    }
-    return null;
-}
+const { findSegmentForIp } = require('../services/discoveryService');
 
 const deviceSchema = z.object({
     hostname: z.string().optional().nullable(),
@@ -120,13 +109,12 @@ module.exports = async function (fastify, opts) {
 
         let registered = 0;
         let skipped = 0;
+        let autoAssigned = 0;
         const errors = [];
 
-        // Check for existing segments if you want, or just leave segment_id null
-        // Doing simple approach as requested.
         const insertStmt = db.prepare(`
-            INSERT INTO devices (hostname, ip_address, mac_address, vendor, device_type, is_critical, notes)
-            VALUES (?, ?, ?, ?, 'workstation', 0, 'Auto-registered from live scan')
+            INSERT INTO devices (hostname, ip_address, mac_address, vendor, device_type, segment_id, is_critical, notes)
+            VALUES (?, ?, ?, ?, 'workstation', ?, 0, 'Auto-registered from live scan')
         `);
 
         // Check existing ones
@@ -157,7 +145,9 @@ module.exports = async function (fastify, opts) {
                 try {
                     // Look up vendor if not in request
                     const vendor = d.vendor || (normalizedMac ? lookupMac(normalizedMac)?.manufacturer : null);
-                    const info = insertStmt.run(d.hostname || null, d.ip, normalizedMac, vendor);
+                    const autoDetectedSegment = findSegmentForIp(d.ip);
+                    const info = insertStmt.run(d.hostname || null, d.ip, normalizedMac, vendor, autoDetectedSegment?.id || null);
+                    if (autoDetectedSegment) autoAssigned++;
 
                     const newDevice = db.prepare('SELECT * FROM devices WHERE id = ?').get(info.lastInsertRowid);
                     // Initial ping asynchronously
@@ -174,7 +164,7 @@ module.exports = async function (fastify, opts) {
 
         tx(devices);
 
-        reply.send({ registered, skipped, errors });
+        reply.send({ registered, skipped, autoAssigned, errors });
     });
 
     fastify.post('/', async (request, reply) => {
@@ -190,7 +180,7 @@ module.exports = async function (fastify, opts) {
 
         let autoDetectedSegment = null;
         if (!segment_id) {
-            autoDetectedSegment = detectSegmentForIp(ip_address);
+            autoDetectedSegment = findSegmentForIp(ip_address);
             if (autoDetectedSegment) segment_id = autoDetectedSegment.id;
         }
 
@@ -238,7 +228,7 @@ module.exports = async function (fastify, opts) {
 
         let autoDetectedSegment = null;
         if (!segment_id) {
-            autoDetectedSegment = detectSegmentForIp(ip_address);
+            autoDetectedSegment = findSegmentForIp(ip_address);
             if (autoDetectedSegment) segment_id = autoDetectedSegment.id;
         }
 
